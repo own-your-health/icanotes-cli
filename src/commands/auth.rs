@@ -192,13 +192,15 @@ fn report_stored(ctx: &Ctx, profile: &ProfileName, grant: &Grant, verified: bool
     if ctx.json() {
         output::json(&v);
     } else {
+        // The label, not the patient id: `patients list` shows the id to
+        // whoever needs it, and this line lands in transcripts.
         let who = grant
             .label
             .as_deref()
-            .map(|l| format!("{l} ({})", grant.id))
-            .unwrap_or_else(|| grant.id.clone());
+            .map(|l| format!("patient {l}"))
+            .unwrap_or_else(|| "the patient".into());
         println!(
-            "Stored the API key for patient {who} in profile {profile}{}.",
+            "Stored the API key for {who} in profile {profile}{}.",
             if verified {
                 ", checked with ICANotes"
             } else {

@@ -156,7 +156,7 @@ impl RateLimiter {
                 ))
                 .with_remedy(format!(
                     "remove it once 15 minutes have passed since the last request: rm {}",
-                    path.display()
+                    shell_quoted(&path.display().to_string())
                 ))
             })?,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Window::default(),
@@ -320,6 +320,11 @@ impl RateLimiter {
             (self.note)(&format!("could not record ICANotes' request window: {e}"));
         }
     }
+}
+
+/// `s` as one shell word: macOS keeps state under `Application Support`.
+fn shell_quoted(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
 }
 
 fn poisoned<T>(_: T) -> CliError {
@@ -515,7 +520,7 @@ mod tests {
     #[test]
     fn a_window_file_that_does_not_read_refuses_rather_than_forgets() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("rate.json");
+        let path = dir.path().join("Application Support").join("rate.json");
         let now = Arc::new(AtomicI64::new(T0));
         let slept = Arc::new(AtomicI64::new(0));
         let notes = Arc::new(Mutex::new(Vec::<String>::new()));
@@ -531,7 +536,12 @@ mod tests {
         std::fs::write(&path, b"{\"blocked_until\": tor").unwrap();
         let e = r.before().unwrap_err();
         assert!(e.to_string().contains("does not read"), "{e}");
-        assert!(e.remedy().unwrap().contains("rm "), "{e}");
+        let remedy = e.remedy().unwrap();
+        assert!(
+            remedy.ends_with(&format!("rm '{}'", path.display())),
+            "{remedy}"
+        );
+        assert_eq!(shell_quoted("a'b c"), r"'a'\''b c'");
         r.after(200, &headers(5, T0 + 100));
         assert!(
             notes.lock().unwrap()[0].contains("could not record"),
