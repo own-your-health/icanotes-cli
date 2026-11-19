@@ -112,6 +112,15 @@ fn login(ctx: &Ctx, label: Option<&str>) -> Result<(), CliError> {
 
 /// Run the export the way `records export --ndjson` does, into memory.
 fn export_bytes(ctx: &Ctx, since: Option<&str>) -> (Vec<u8>, Result<Option<CliError>, CliError>) {
+    export_lines(ctx, since, pk_med_records::MAX_LINE_BYTES)
+}
+
+/// The same, with a lower stream line limit.
+fn export_lines(
+    ctx: &Ctx,
+    since: Option<&str>,
+    max_line_bytes: usize,
+) -> (Vec<u8>, Result<Option<CliError>, CliError>) {
     let config = ctx.config().unwrap();
     let profile = ctx.profile(&config).unwrap();
     let (grant, cred) = ctx
@@ -126,6 +135,7 @@ fn export_bytes(ctx: &Ctx, since: Option<&str>) -> (Vec<u8>, Result<Option<CliEr
         today: pk_cli_core::dates::today(),
         pulled_at: "2026-01-01T00:00:00Z".into(),
         version: "0.0.0-test",
+        max_line_bytes,
     };
     let mut out = Vec::new();
     let r = export::run(&api, &plan, &mut out, &|_| {}).map(|(_, ended)| ended);
@@ -321,13 +331,14 @@ fn an_export_carries_every_endpoint_and_the_ccd() {
     ] {
         assert_eq!(count(&got, t), n, "{t}");
     }
-    // The CareTeam ICANotes sends without an id gets a stable one.
+    // The CareTeam ICANotes sends without an id goes in as sent.
     let team = got
         .resources
         .iter()
         .find(|r| r.resource_type == "CareTeam")
         .unwrap();
-    assert_eq!(team.id, "icanotes-careteam-1");
+    assert_eq!(team.id, "");
+    assert!(!team.raw.contains("\"id\":\"icanotes"), "{}", team.raw);
     // The document's Binary carries the C-CDA as ICANotes sent it.
     let bin = got
         .resources
@@ -441,6 +452,64 @@ fn a_failed_endpoint_is_a_skip_and_the_export_goes_on() {
 }
 
 #[test]
+fn resources_with_empty_ids_are_written_as_sent() {
+    let mock = Mock::start();
+    let dir = tmp();
+    let ctx = ctx(&dir, &mock);
+    login(&ctx, None).unwrap();
+    // ICANotes writes empty strings for absent values.
+    mock.body(
+        "PatientDemographics",
+        br#"[{"resource":{"resourceType":"Patient","id":"","name":[{"family":"Testpatient"}]},"request":{"method":"POST"}}]"#,
+    );
+    mock.body(
+        "CareTeam",
+        br#"[{"resource":{"resourceType":"CareTeam","id":null,"status":"active"}},{"resource":{"resourceType":"CareTeam","status":"inactive"}}]"#,
+    );
+    let (bytes, r) = export_bytes(&ctx, None);
+    assert!(r.unwrap().is_none());
+    let got = read(&bytes);
+    assert!(got.trailer.complete, "{:?}", got.trailer);
+    assert_eq!(count(&got, "Patient"), 1);
+    assert_eq!(count(&got, "CareTeam"), 2);
+    let patient = got
+        .resources
+        .iter()
+        .find(|r| r.resource_type == "Patient")
+        .unwrap();
+    assert_eq!(patient.raw.matches("\"id\"").count(), 1, "{}", patient.raw);
+}
+
+#[test]
+fn a_document_too_large_for_a_line_is_skipped_whole() {
+    let mock = Mock::start();
+    let dir = tmp();
+    let ctx = ctx(&dir, &mock);
+    login(&ctx, None).unwrap();
+    // The synthetic C-CDA is a few KiB; as base64 in a Binary it is over a
+    // 3000-byte line, and every other resource is under it.
+    let (bytes, r) = export_lines(&ctx, None, 3000);
+    assert!(r.unwrap().is_none());
+    let got = read(&bytes);
+    assert!(got.trailer.complete);
+    assert_eq!(count(&got, "DocumentReference"), 0);
+    assert_eq!(count(&got, "Binary"), 0);
+    assert_eq!(count(&got, "CareTeam"), 1);
+    let skip = got
+        .trailer
+        .skipped
+        .iter()
+        .find(|s| s.code == "too_large")
+        .expect("a too_large skip");
+    assert_eq!(skip.resource_type.as_deref(), Some("DocumentReference"));
+    assert!(
+        skip.reason.contains("documents download"),
+        "{}",
+        skip.reason
+    );
+}
+
+#[test]
 fn a_key_refused_mid_export_ends_the_stream_incomplete() {
     let mock = Mock::start();
     let dir = tmp();
@@ -500,12 +569,14 @@ fn the_export_waits_out_icanotes_window_of_ten() {
     let mock = Mock::start();
     let dir = tmp();
     let ctx = ctx(&dir, &mock);
-    login(&ctx, None).unwrap();
     // A two-second window keeps the test short; ICANotes' is ten minutes.
+    // Set before the login's request, so every answer counts in it.
     mock.window(10, 2);
+    login(&ctx, None).unwrap();
     let started = std::time::Instant::now();
     let (bytes, r) = export_bytes(&ctx, None);
-    assert!(r.unwrap().is_none());
+    let ended = r.unwrap();
+    assert!(ended.is_none(), "{:?}", ended.map(|e| e.to_string()));
     let got = read(&bytes);
     assert!(got.trailer.complete, "{:?}", got.trailer);
     assert_eq!(count(&got, "Binary"), 1);
@@ -567,7 +638,15 @@ fn documents_download_writes_the_ccd() {
         .collect();
     assert_eq!(files.len(), 1, "{files:?}");
     let name = files[0].to_string_lossy().into_owned();
-    assert_eq!(name, "2020-01-02_Continuity_of_Care_Document.xml");
+    // The day, the title and the end of the document's id.
+    assert!(
+        name.starts_with("2020-01-02_Continuity_of_Care_Document_") && name.ends_with(".xml"),
+        "{name}"
+    );
+    assert_eq!(
+        name.len(),
+        "2020-01-02_Continuity_of_Care_Document_".len() + 8 + 4
+    );
     assert_eq!(std::fs::read(out.join(&name)).unwrap(), mock::CCD);
     #[cfg(unix)]
     {
@@ -639,6 +718,35 @@ fn api_passthrough_redacts_the_key_from_what_it_writes() {
         "{text}"
     );
     assert!(text.contains("[redacted]"), "{text}");
+    // Echoed JSON-escaped and lowercase-encoded: still nothing, in the
+    // bytes or in what they parse to.
+    let escaped = SECRET
+        .replace('/', "\\/")
+        .replace('+', "\\u002B")
+        .replace('=', "\\u003d");
+    let lower: String = url::form_urlencoded::byte_serialize(SECRET.as_bytes())
+        .collect::<String>()
+        .to_ascii_lowercase();
+    mock.body(
+        "Goal",
+        format!("[{{\"a\":\"{escaped}\",\"b\":\"x?userSecret={lower}&y\"}}]").as_bytes(),
+    );
+    commands::api::run(
+        &ctx,
+        &ApiArgs {
+            method: "GET".into(),
+            path: "Goal?req_type=Complete".into(),
+            output: Some(file.clone()),
+            who: PatientArgs::default(),
+        },
+    )
+    .unwrap();
+    let text = std::fs::read_to_string(&file).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
+    for shown in [text.clone(), parsed.to_string()] {
+        assert!(!shown.contains("synthetic"), "{shown}");
+        assert!(!shown.contains("secret"), "{shown}");
+    }
     let seen = mock.seen();
     let last = seen.last().unwrap();
     assert_eq!(last.endpoint, "Goal");

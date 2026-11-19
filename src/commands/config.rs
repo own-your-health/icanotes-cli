@@ -19,7 +19,7 @@ pub fn run(ctx: &Ctx, cmd: &ConfigCmd) -> Result<(), CliError> {
             );
         }
         ConfigCmd::Show => {
-            let c = ctx.config()?;
+            let c = ctx.config_unchecked()?;
             let v = json!({
                 "api_base": c.api_base(),
                 "portal_url": c.portal_url(),
@@ -29,7 +29,7 @@ pub fn run(ctx: &Ctx, cmd: &ConfigCmd) -> Result<(), CliError> {
             output::emit(ctx.json(), "config", v, output::render);
         }
         ConfigCmd::Set { key, value } => {
-            let mut c = ctx.config()?;
+            let mut c = ctx.config_unchecked()?;
             c.set(key, value)?;
             ctx.save_config(&c)?;
             output::emit(
@@ -40,7 +40,7 @@ pub fn run(ctx: &Ctx, cmd: &ConfigCmd) -> Result<(), CliError> {
             );
         }
         ConfigCmd::Unset { key } => {
-            let mut c = ctx.config()?;
+            let mut c = ctx.config_unchecked()?;
             c.unset(key)?;
             ctx.save_config(&c)?;
             output::emit(

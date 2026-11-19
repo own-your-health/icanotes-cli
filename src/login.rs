@@ -24,14 +24,22 @@ use crate::credential::KeyPair;
 /// while the page shows none. It looks for the values the page labels as
 /// the user key and the user secret (an input's value or the text beside
 /// its label), and answers only when both are there.
+///
+/// A value is at least 8 printable characters with no space. Buttons,
+/// links and labels are never read as values, and neither is a value made
+/// only of the page's own words ("UserSecret", "Generate", "Copy key"), so
+/// a label the page names `lblUserSecret` is passed over for the value
+/// beside it.
 pub const KEY_EXPRESSION: &str = r#"(() => {
   const norm = (s) => (s || '').replace(/\s+/g, ' ').trim();
+  const UI = /^(?:user|api|client|patient|portal|fhir|access|new|your|generate|generated|regenerate|copy|copied|show|hide|reveal|delete|remove|credentials?|keys?|secrets?|tokens?|value|here|[\s:_\-.])+$/i;
+  const NOT_VALUES = 'button, a, option, select, label, th, dt, [role=button], [role=link]';
   const valueOf = (el) => {
-    if (!el) return '';
+    if (!el || (el.matches && el.matches(NOT_VALUES))) return '';
     if ('value' in el && typeof el.value === 'string' && el.value.trim()) return el.value.trim();
     return norm(el.textContent);
   };
-  const looksLike = (v) => /^[\x21-\x7e]{8,1000}$/.test(v);
+  const looksLike = (v) => /^[\x21-\x7e]{8,1000}$/.test(v) && !UI.test(v);
   const find = (re) => {
     // An input or element whose id, name or label names it.
     for (const el of document.querySelectorAll('input, textarea, [id], [name]')) {

@@ -15,15 +15,15 @@ and the `pk-med-*` crates from
 | `src/main.rs` | dispatch, `info`, exit codes, `--profile` refused where it means nothing |
 | `src/cli.rs` | the clap tree |
 | `src/commands/*.rs` | one module per command group; `Ctx` in `mod.rs`: the config, `--profile`, the vault (or the test service's), the transport, the browser window, `rate.json` |
-| `src/config.rs` | the config (`api_base`, `portal_url`), the profiles and each one's grants (`ProfileSettings`, `Grant`), the organization, which hosts are allowed |
+| `src/config.rs` | the config (`api_base`, `portal_url`), the profiles and each one's grants (`ProfileSettings`, `Grant`), the organization, which hosts are allowed (checked on every load) |
 | `src/credential.rs` | the key and secret: parsing `<key>:<secret>`, the vault entry `<profile>/icanotes/<patient id>` |
 | `src/client.rs` | the patient API: requests, statuses, parsing answers; `Fetch` is the transport seam |
-| `src/redact.rs` | removing the key and secret (raw and URL-encoded) from text, bytes and errors |
-| `src/ratelimit.rs` | ICANotes' window of 10 and the 15-minute block after a 429, kept between runs |
-| `src/export.rs` | what `records export` pulls, in order, which failures skip and which end it, ids for resources without one |
+| `src/redact.rs` | removing the key and secret from text, bytes and errors: in place where written or percent-encoded, and any token that decodes to one (JSON escapes, HTML references, mixed or double encoding) |
+| `src/ratelimit.rs` | ICANotes' window of 10 and the 15-minute block after a 429, kept between runs and shared by runs at once (`rate.json` under `rate.lock`) |
+| `src/export.rs` | what `records export` pulls, in order, which failures skip and which end it |
 | `src/zip.rs` | the minimal ZIP reader for `PatientCCD` |
-| `src/ccd.rs` | C-CDA headers, document ids, the DocumentReference and Binary |
-| `src/login.rs` | `auth login --browser`: the expression that reads the key off the page, remembered verdicts |
+| `src/ccd.rs` | C-CDA headers, document ids and file names, the DocumentReference and Binary |
+| `src/login.rs` | `auth login --browser`: the expression that reads the key off the page (`make check-key-expression`), remembered verdicts |
 | `tests/support/mock.rs` | the mock ICANotes API on 127.0.0.1, shared by `tests/e2e.rs` and `examples/mock_icanotes.rs` (`make mock`) |
 | `docs/api.md` | ICANotes' API, its sources and its traps; read before changing the client, export or login |
 
@@ -80,7 +80,11 @@ These are behavioral-health records: the most sensitive a household has.
   the Keychain or the network.
 - Read-only: icanotes never writes to ICANotes; `api` takes GET only.
 - `api_base` is https on `icanotes.com` or a host under it, or a loopback
-  test server; `portal_url` must be https.
+  test server; `portal_url` must be https. Both are checked when the config
+  loads, so a hand-edited file or one named by `--config` cannot send the
+  stored key elsewhere; only `config show|set|unset` read it unchecked.
+- A resource ICANotes sends without an id goes into the stream as sent;
+  icanotes never makes one up.
 - Every binary-producing `make` target signs with the stable
   `pk-cli-codesign` identity.
 
@@ -90,19 +94,23 @@ These are behavioral-health records: the most sensitive a household has.
 
 - `tests/cli_surface.rs`: help, exit codes, JSON errors, `info`,
   completions, `orgs`, `config`, `profiles`, `--profile` required and
-  refused, a profile with nothing stored, malformed pairs never echoed.
+  refused, a profile with nothing stored, malformed pairs never echoed, a
+  hand-edited `api_base` refused.
 - `tests/e2e.rs`: in process against the mock, as profile `adult1`: browser
   login (one check per pair shown), a refused pair never stored,
   `set-credential`, a full export (counts, ids, the Binary's bytes, 13 keyed
-  requests), `--since`, failing endpoints as skips, a 401 mid-export, a 401
-  before the header (nothing written), a 429 and the block kept for the next
-  run, waiting out a window of 10, a window longer than `--max-wait`,
-  documents download, `api` redaction, a transport error naming no URL,
-  status, logout and profile removal.
+  requests), `--since`, failing endpoints as skips, empty and null ids
+  passed through, a document too large for a line skipped whole, a 401 mid-export, a 401 before the header (nothing
+  written), a 429 and the block kept for the next run, waiting out a window
+  of 10, a window longer than `--max-wait`, documents download, `api`
+  redaction (encoded and JSON-escaped echoes), a transport error naming no
+  URL, status, logout and profile removal.
 - `tests/fixture_shapes.rs`: the fixtures read as the client reads them, keep
   the shapes the export handles, and carry only dummy identities.
 - `tests/no_personal_data.rs`: personal-data shapes in tracked files.
 - Unit tests in each module.
+- `scripts/check-key-expression.mjs` (`make check-key-expression`, needs
+  Playwright): the login page script against synthetic portal pages.
 
 ## Definition of done
 

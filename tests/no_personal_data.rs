@@ -109,11 +109,44 @@ fn without_public_doc_urls(line: &str) -> String {
     out
 }
 
+/// The line with each ISO date (`YYYY-MM-DD`) blanked, so a version and a
+/// date beside it (`v0.1.0 (2026-11-19)`) do not join into a phone number.
+fn without_iso_dates(line: &str) -> String {
+    let b = line.as_bytes();
+    let mut out = line.to_string();
+    let digits =
+        |i: usize, n: usize| b.len() >= i + n && b[i..i + n].iter().all(u8::is_ascii_digit);
+    let mut i = 0;
+    while i + 10 <= b.len() {
+        let date = digits(i, 4)
+            && b[i + 4] == b'-'
+            && digits(i + 5, 2)
+            && b[i + 7] == b'-'
+            && digits(i + 8, 2)
+            && (i == 0 || !b[i - 1].is_ascii_digit())
+            && (i + 10 == b.len() || !b[i + 10].is_ascii_digit());
+        if date
+            && is_hl7_timestamp(&format!(
+                "{}{}{}",
+                &line[i..i + 4],
+                &line[i + 5..i + 7],
+                &line[i + 8..i + 10]
+            ))
+        {
+            out.replace_range(i..i + 10, "xxxx-xx-xx");
+            i += 10;
+        } else {
+            i += 1;
+        }
+    }
+    out
+}
+
 /// The personal-data shapes on one line, each as `kind value`. A line
 /// naming SNOMED carries public terminology codes, not personal numbers.
 fn scan_line(line: &str) -> Vec<String> {
     let mut findings = Vec::new();
-    let line = &without_hex_ids(&without_public_doc_urls(line));
+    let line = &without_iso_dates(&without_hex_ids(&without_public_doc_urls(line)));
     let public_codes = line.to_ascii_lowercase().contains("snomed");
     // Phone, loan, policy and card numbers: 7+ digit runs, and the
     // 3-3-4 phone shape.
@@ -213,6 +246,7 @@ fn the_scanner_flags_real_shapes_and_passes_dummies() {
         "member 7342918abc",
         "phone 2015062203",
         "https://documenter.example.com/view/2843466/x",
+        "call 772-404-1234 on 2026-11-19",
     ] {
         assert!(!scan_line(real).is_empty(), "missed: {real}");
     }
@@ -228,6 +262,7 @@ fn the_scanner_flags_real_shapes_and_passes_dummies() {
         "<effectiveTime value=\"20200102103000-0500\"/>",
         "<birthTime value=\"19000101\"/>",
         "  https://documenter.getpostman.com/view/2843466/RW1bozWC (published",
+        "## v0.1.0 (2026-11-19)",
     ] {
         assert!(
             scan_line(dummy).is_empty(),

@@ -27,7 +27,13 @@ fn fetch(ctx: &Ctx, who: &PatientArgs) -> Result<Vec<CcdDocument>, CliError> {
     let (_, cred) = ctx.grant(&config, &profile, who)?;
     let api = ctx.api(&config, minutes(who.max_wait))?;
     let (zip, _) = api.ccd(&cred.pair(), &cred.patient_id, &Range::Complete)?;
-    let (mut docs, _) = ccd::documents(crate::zip::read(&zip)?, &cred.patient_id)?;
+    let archive = ccd::documents(crate::zip::read(&zip)?, &cred.patient_id);
+    for why in &archive.unreadable {
+        ctx.note(format!(
+            "left out a file of the archive that is not a C-CDA document: {why}"
+        ));
+    }
+    let mut docs = archive.documents;
     docs.sort_by_key(|d| std::cmp::Reverse(ccd::day(&d.header)));
     Ok(docs)
 }
@@ -70,8 +76,7 @@ fn download(ctx: &Ctx, args: &DownloadArgs) -> Result<(), CliError> {
             .map_err(|e| CliError::Other(format!("creating {}: {e}", args.output.display())))?;
         let mut saved = Vec::new();
         for d in &docs {
-            let path = args.output.join(ccd::file_name(d));
-            saved.push(write(d, &path, args.force)?);
+            saved.push(write(d, &args.output.join(ccd::file_name(d)), args.force)?);
         }
         let batch = DownloadBatch::new(args.output.display().to_string(), saved);
         pk_cli_documents::emit(&batch, ctx.json());

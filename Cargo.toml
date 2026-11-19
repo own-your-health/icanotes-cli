@@ -44,10 +44,12 @@ reqwest = { version = "0.12", default-features = false, features = ["blocking", 
 url = "2"
 base64 = "0.22"
 sha2 = "0.10"
+# Finding the key and secret in answers of up to 256 MiB.
+memchr = "2"
 # The ZIP's deflated entries.
 flate2 = "1"
 # The C-CDA header (title, type, date) for its DocumentReference.
-quick-xml = "0.37"
+quick-xml = "0.42"
 
 [dev-dependencies]
 pk-med-records = { git = "https://github.com/piekstra/medical-common", tag = "v0.6.2", features = ["test-util"] }

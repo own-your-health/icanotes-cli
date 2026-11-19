@@ -59,6 +59,7 @@ fn export_cmd(ctx: &Ctx, args: &ExportArgs) -> Result<(), CliError> {
         today: pk_cli_core::dates::today(),
         pulled_at: pk_cli_core::dates::fmt_rfc3339(crate::ratelimit::now()),
         version: VERSION,
+        max_line_bytes: pk_med_records::MAX_LINE_BYTES,
     };
     let note = |m: &str| ctx.note(m);
     match &args.output {

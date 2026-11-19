@@ -60,10 +60,11 @@ impl std::fmt::Debug for CcdDocument {
 /// the first participant or the body: nothing about the patient is read.
 pub fn header(xml: &[u8]) -> Result<CdaHeader, CliError> {
     let mut reader = quick_xml::Reader::from_reader(xml);
-    reader.config_mut().trim_text(true);
     let mut out = CdaHeader::default();
     let mut depth = 0usize;
-    let mut in_title = false;
+    // The title's text while inside it: its text pieces and the entity
+    // references between them (`&amp;`), which quick-xml reads apart.
+    let mut title: Option<String> = None;
     let mut root_seen = false;
     let mut buf = Vec::new();
     loop {
@@ -77,10 +78,10 @@ pub fn header(xml: &[u8]) -> Result<CdaHeader, CliError> {
         match event {
             Event::Start(ref e) | Event::Empty(ref e) => {
                 let empty = matches!(event, Event::Empty(_));
-                let name = e.local_name();
-                let name = name.as_ref();
+                let local = e.local_name();
+                let name: &str = local.as_ref();
                 if depth == 0 {
-                    if name != b"ClinicalDocument" {
+                    if name != "ClinicalDocument" {
                         return Err(CliError::Upstream(
                             "an XML file in the C-CDA archive is not a ClinicalDocument".into(),
                         ));
@@ -88,14 +89,14 @@ pub fn header(xml: &[u8]) -> Result<CdaHeader, CliError> {
                     root_seen = true;
                 } else if depth == 1 {
                     match name {
-                        b"recordTarget" | b"author" | b"component" | b"custodian" => break,
-                        b"code" => {
-                            out.code = attr(e, b"code");
-                            out.code_system = attr(e, b"codeSystem");
-                            out.code_display = attr(e, b"displayName");
+                        "recordTarget" | "author" | "component" | "custodian" => break,
+                        "code" => {
+                            out.code = attr(e, "code");
+                            out.code_system = attr(e, "codeSystem");
+                            out.code_display = attr(e, "displayName");
                         }
-                        b"effectiveTime" => out.effective = attr(e, b"value"),
-                        b"title" if !empty => in_title = true,
+                        "effectiveTime" => out.effective = attr(e, "value"),
+                        "title" if !empty && out.title.is_none() => title = Some(String::new()),
                         _ => {}
                     }
                 }
@@ -103,16 +104,29 @@ pub fn header(xml: &[u8]) -> Result<CdaHeader, CliError> {
                     depth += 1;
                 }
             }
-            Event::Text(t) if in_title => {
-                let text = t.unescape().map(|c| c.into_owned()).unwrap_or_default();
-                let joined = match out.title.take() {
-                    Some(prev) => format!("{prev} {text}"),
-                    None => text,
-                };
-                out.title = Some(joined.trim().to_string()).filter(|s| !s.is_empty());
+            Event::Text(t) => {
+                if let Some(s) = title.as_mut() {
+                    s.push_str(&t.xml10_content());
+                }
+            }
+            Event::GeneralRef(r) => {
+                if let Some(s) = title.as_mut() {
+                    if r.is_char_ref() {
+                        if let Ok(Some(c)) = r.resolve_char_ref() {
+                            s.push(c);
+                        }
+                    } else if let Some(v) = quick_xml::escape::resolve_predefined_entity(&r) {
+                        s.push_str(v);
+                    }
+                }
             }
             Event::End(_) => {
-                in_title = false;
+                if depth == 2 {
+                    if let Some(s) = title.take() {
+                        let s = s.split_whitespace().collect::<Vec<_>>().join(" ");
+                        out.title = Some(s).filter(|s| !s.is_empty());
+                    }
+                }
                 depth = depth.saturating_sub(1);
                 if depth == 0 && root_seen {
                     break;
@@ -144,44 +158,62 @@ fn xml_error_kind(e: &quick_xml::Error) -> &'static str {
     }
 }
 
-fn attr(e: &quick_xml::events::BytesStart, key: &[u8]) -> Option<String> {
+fn attr(e: &quick_xml::events::BytesStart, key: &str) -> Option<String> {
     e.attributes()
         .flatten()
-        .find(|a| a.key.local_name().as_ref() == key)
-        .and_then(|a| a.unescape_value().ok().map(|v| v.trim().to_string()))
+        .find(|a| AsRef::<str>::as_ref(&a.key.local_name()) == key)
+        .and_then(|a| {
+            a.normalized_value(quick_xml::XmlVersion::Implicit1_0)
+                .ok()
+                .map(|v| v.trim().to_string())
+        })
         .filter(|v| !v.is_empty())
 }
 
-/// The documents in an archive's entries: its `.xml` files, each with its
-/// stable id. Other files (a stylesheet) are counted, not kept.
-pub fn documents(
-    entries: Vec<ZipEntry>,
-    patient_id: &str,
-) -> Result<(Vec<CcdDocument>, usize), CliError> {
-    let mut out: Vec<CcdDocument> = Vec::new();
-    let mut other = 0;
+/// What an archive holds.
+#[derive(Debug, Default)]
+pub struct Archive {
+    /// Its C-CDA documents, each with its stable id.
+    pub documents: Vec<CcdDocument>,
+    /// Files that are not `.xml` (a stylesheet): counted, not kept.
+    pub other: usize,
+    /// For each `.xml` file that did not read as a C-CDA document (an IHE
+    /// XDM `METADATA.XML`, a file in another encoding), why, naming
+    /// nothing in it. The others are kept.
+    pub unreadable: Vec<String>,
+}
+
+/// The documents in an archive's entries.
+pub fn documents(entries: Vec<ZipEntry>, patient_id: &str) -> Archive {
+    let mut out = Archive::default();
     for e in entries {
         if !e.name.to_ascii_lowercase().ends_with(".xml") {
-            other += 1;
+            out.other += 1;
             continue;
         }
-        let header = header(&e.bytes)?;
+        let header = match header(&e.bytes) {
+            Ok(h) => h,
+            Err(err) => {
+                out.unreadable.push(err.message().to_string());
+                continue;
+            }
+        };
         let mut id = document_id(patient_id, &header, &e.name);
         // Two documents the same in type, time and title: told apart by
         // their order in the archive.
         let mut n = 1;
-        while out.iter().any(|d| d.id == id) {
+        while out.documents.iter().any(|d| d.id == id) {
             n += 1;
             id = format!("{}-{n}", document_id(patient_id, &header, &e.name));
         }
-        out.push(CcdDocument {
+        out.documents.push(CcdDocument {
             id,
             entry: e.name,
             header,
             bytes: e.bytes,
         });
     }
-    Ok((out, other))
+    out
 }
 
 /// `ccd-` and 24 hex digits of a SHA-256 over the patient and what makes
@@ -252,13 +284,17 @@ pub fn name(doc: &CcdDocument) -> String {
         .unwrap_or_else(|| "C-CDA document".into())
 }
 
-/// The file name `documents download` writes: the day, the name, `.xml`.
+/// The file name `documents download` writes: the day, the name and the
+/// end of the document's id, `.xml`. The id's end keeps two documents of
+/// one day and title apart, and the same document's name the same on
+/// every download, whatever else the archive holds.
 pub fn file_name(doc: &CcdDocument) -> String {
     let base = match day(&doc.header) {
         Some(d) => format!("{d}_{}", name(doc)),
         None => name(doc),
     };
-    let safe = pk_cli_documents::fs_safe(&base);
+    let tail = &doc.id[doc.id.len().saturating_sub(8)..];
+    let safe = pk_cli_documents::fs_safe(&format!("{base}_{tail}"));
     format!("{safe}.xml")
 }
 
@@ -413,8 +449,9 @@ mod tests {
     #[test]
     fn a_document_maps_to_a_reference_and_its_binary() {
         let zip = crate::zip::write(&[("ccd/one.xml", DOC.as_bytes()), ("CDA.xsl", b"<x/>")]);
-        let (docs, other) = documents(crate::zip::read(&zip).unwrap(), "1001").unwrap();
-        assert_eq!((docs.len(), other), (1, 1));
+        let a = documents(crate::zip::read(&zip).unwrap(), "1001");
+        assert_eq!((a.documents.len(), a.other), (1, 1));
+        let docs = a.documents;
         let d = &docs[0];
         let r = document_reference(d, Some("p-1"));
         assert_eq!(r["type"]["coding"][0]["code"], "34133-9");
@@ -434,15 +471,56 @@ mod tests {
         let row = document_row(d);
         assert_eq!(row.date.as_deref(), Some("2020-01-02"));
         assert_eq!(
-            row.file.as_deref(),
-            Some("2020-01-02_Continuity_of_Care___Summary.xml")
+            row.file,
+            Some(format!(
+                "2020-01-02_Continuity_of_Care___Summary_{}.xml",
+                &d.id[20..]
+            ))
         );
     }
 
     #[test]
     fn twin_documents_get_distinct_ids() {
         let zip = crate::zip::write(&[("a.xml", DOC.as_bytes()), ("b.xml", DOC.as_bytes())]);
-        let (docs, _) = documents(crate::zip::read(&zip).unwrap(), "1001").unwrap();
+        let docs = documents(crate::zip::read(&zip).unwrap(), "1001").documents;
         assert_ne!(docs[0].id, docs[1].id);
+        // Each gets its own file, named the same alone or beside the other.
+        assert_ne!(file_name(&docs[0]), file_name(&docs[1]));
+        let alone = documents(
+            crate::zip::read(&crate::zip::write(&[("a.xml", DOC.as_bytes())])).unwrap(),
+            "1001",
+        )
+        .documents;
+        assert_eq!(file_name(&alone[0]), file_name(&docs[0]));
+        assert!(file_name(&docs[0]).ends_with(&format!("_{}.xml", &docs[0].id[20..])));
+    }
+
+    #[test]
+    fn a_title_reads_whole_across_references_and_lines() {
+        let h = header(
+            b"<ClinicalDocument xmlns=\"urn:hl7-org:v3\"><title>Care &#38; Plan\n   &lt;Notes&gt; &amp;\r\n Summary</title><code code=\"34133-9\" codeSystem=\"2.16.840.1.113883.6.1\" displayName=\"A &amp; B\"/></ClinicalDocument>",
+        )
+        .unwrap();
+        assert_eq!(h.title.as_deref(), Some("Care & Plan <Notes> & Summary"));
+        assert_eq!(h.code.as_deref(), Some("34133-9"));
+        assert_eq!(h.code_display.as_deref(), Some("A & B"));
+    }
+
+    #[test]
+    fn an_xml_file_that_is_not_a_document_leaves_the_others() {
+        let zip = crate::zip::write(&[
+            (
+                "METADATA.XML",
+                b"<SubmitObjectsRequest xmlns=\"urn:x\"/>".as_slice(),
+            ),
+            ("ccd/one.xml", DOC.as_bytes()),
+            (
+                "broken.xml",
+                b"<ClinicalDocument><title>x</code></ClinicalDocument>".as_slice(),
+            ),
+        ]);
+        let a = documents(crate::zip::read(&zip).unwrap(), "1001");
+        assert_eq!(a.documents.len(), 1);
+        assert_eq!(a.unreadable.len(), 2, "{:?}", a.unreadable);
     }
 }
