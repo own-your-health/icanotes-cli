@@ -60,10 +60,11 @@ impl std::fmt::Debug for CcdDocument {
 /// the first participant or the body: nothing about the patient is read.
 pub fn header(xml: &[u8]) -> Result<CdaHeader, CliError> {
     let mut reader = quick_xml::Reader::from_reader(xml);
-    reader.config_mut().trim_text(true);
     let mut out = CdaHeader::default();
     let mut depth = 0usize;
-    let mut in_title = false;
+    // The title's text while inside it: its text pieces and the entity
+    // references between them (`&amp;`), which quick-xml reads apart.
+    let mut title: Option<String> = None;
     let mut root_seen = false;
     let mut buf = Vec::new();
     loop {
@@ -77,10 +78,10 @@ pub fn header(xml: &[u8]) -> Result<CdaHeader, CliError> {
         match event {
             Event::Start(ref e) | Event::Empty(ref e) => {
                 let empty = matches!(event, Event::Empty(_));
-                let name = e.local_name();
-                let name = name.as_ref();
+                let local = e.local_name();
+                let name: &str = local.as_ref();
                 if depth == 0 {
-                    if name != b"ClinicalDocument" {
+                    if name != "ClinicalDocument" {
                         return Err(CliError::Upstream(
                             "an XML file in the C-CDA archive is not a ClinicalDocument".into(),
                         ));
@@ -88,14 +89,14 @@ pub fn header(xml: &[u8]) -> Result<CdaHeader, CliError> {
                     root_seen = true;
                 } else if depth == 1 {
                     match name {
-                        b"recordTarget" | b"author" | b"component" | b"custodian" => break,
-                        b"code" => {
-                            out.code = attr(e, b"code");
-                            out.code_system = attr(e, b"codeSystem");
-                            out.code_display = attr(e, b"displayName");
+                        "recordTarget" | "author" | "component" | "custodian" => break,
+                        "code" => {
+                            out.code = attr(e, "code");
+                            out.code_system = attr(e, "codeSystem");
+                            out.code_display = attr(e, "displayName");
                         }
-                        b"effectiveTime" => out.effective = attr(e, b"value"),
-                        b"title" if !empty => in_title = true,
+                        "effectiveTime" => out.effective = attr(e, "value"),
+                        "title" if !empty && out.title.is_none() => title = Some(String::new()),
                         _ => {}
                     }
                 }
@@ -103,16 +104,29 @@ pub fn header(xml: &[u8]) -> Result<CdaHeader, CliError> {
                     depth += 1;
                 }
             }
-            Event::Text(t) if in_title => {
-                let text = t.unescape().map(|c| c.into_owned()).unwrap_or_default();
-                let joined = match out.title.take() {
-                    Some(prev) => format!("{prev} {text}"),
-                    None => text,
-                };
-                out.title = Some(joined.trim().to_string()).filter(|s| !s.is_empty());
+            Event::Text(t) => {
+                if let Some(s) = title.as_mut() {
+                    s.push_str(&t.xml10_content());
+                }
+            }
+            Event::GeneralRef(r) => {
+                if let Some(s) = title.as_mut() {
+                    if r.is_char_ref() {
+                        if let Ok(Some(c)) = r.resolve_char_ref() {
+                            s.push(c);
+                        }
+                    } else if let Some(v) = quick_xml::escape::resolve_predefined_entity(&r) {
+                        s.push_str(v);
+                    }
+                }
             }
             Event::End(_) => {
-                in_title = false;
+                if depth == 2 {
+                    if let Some(s) = title.take() {
+                        let s = s.split_whitespace().collect::<Vec<_>>().join(" ");
+                        out.title = Some(s).filter(|s| !s.is_empty());
+                    }
+                }
                 depth = depth.saturating_sub(1);
                 if depth == 0 && root_seen {
                     break;
@@ -144,11 +158,15 @@ fn xml_error_kind(e: &quick_xml::Error) -> &'static str {
     }
 }
 
-fn attr(e: &quick_xml::events::BytesStart, key: &[u8]) -> Option<String> {
+fn attr(e: &quick_xml::events::BytesStart, key: &str) -> Option<String> {
     e.attributes()
         .flatten()
-        .find(|a| a.key.local_name().as_ref() == key)
-        .and_then(|a| a.unescape_value().ok().map(|v| v.trim().to_string()))
+        .find(|a| AsRef::<str>::as_ref(&a.key.local_name()) == key)
+        .and_then(|a| {
+            a.normalized_value(quick_xml::XmlVersion::Implicit1_0)
+                .ok()
+                .map(|v| v.trim().to_string())
+        })
         .filter(|v| !v.is_empty())
 }
 
@@ -266,34 +284,18 @@ pub fn name(doc: &CcdDocument) -> String {
         .unwrap_or_else(|| "C-CDA document".into())
 }
 
-/// The file name `documents download` writes: the day, the name, `.xml`.
+/// The file name `documents download` writes: the day, the name and the
+/// end of the document's id, `.xml`. The id's end keeps two documents of
+/// one day and title apart, and the same document's name the same on
+/// every download, whatever else the archive holds.
 pub fn file_name(doc: &CcdDocument) -> String {
     let base = match day(&doc.header) {
         Some(d) => format!("{d}_{}", name(doc)),
         None => name(doc),
     };
-    let safe = pk_cli_documents::fs_safe(&base);
+    let tail = &doc.id[doc.id.len().saturating_sub(8)..];
+    let safe = pk_cli_documents::fs_safe(&format!("{base}_{tail}"));
     format!("{safe}.xml")
-}
-
-/// The file names `documents download --all` writes, one per document:
-/// [`file_name`], with the end of the id added to every name two documents
-/// share (a day's two notes of one title), so none overwrites another and
-/// each keeps its name on the next download.
-pub fn file_names(docs: &[CcdDocument]) -> Vec<String> {
-    let names: Vec<String> = docs.iter().map(file_name).collect();
-    names
-        .iter()
-        .zip(docs)
-        .map(|(n, d)| {
-            if names.iter().filter(|m| *m == n).count() < 2 {
-                return n.clone();
-            }
-            let stem = n.strip_suffix(".xml").unwrap_or(n);
-            let tail = &d.id[d.id.len().saturating_sub(8)..];
-            format!("{stem}_{tail}.xml")
-        })
-        .collect()
 }
 
 fn meta() -> Value {
@@ -469,8 +471,11 @@ mod tests {
         let row = document_row(d);
         assert_eq!(row.date.as_deref(), Some("2020-01-02"));
         assert_eq!(
-            row.file.as_deref(),
-            Some("2020-01-02_Continuity_of_Care___Summary.xml")
+            row.file,
+            Some(format!(
+                "2020-01-02_Continuity_of_Care___Summary_{}.xml",
+                &d.id[20..]
+            ))
         );
     }
 
@@ -479,14 +484,26 @@ mod tests {
         let zip = crate::zip::write(&[("a.xml", DOC.as_bytes()), ("b.xml", DOC.as_bytes())]);
         let docs = documents(crate::zip::read(&zip).unwrap(), "1001").documents;
         assert_ne!(docs[0].id, docs[1].id);
-        // Each gets its own file, the same on every download.
-        let names = file_names(&docs);
-        assert_ne!(names[0], names[1]);
-        assert_eq!(names, file_names(&docs));
-        assert!(
-            names[0].ends_with(&format!("_{}.xml", &docs[0].id[20..])),
-            "{names:?}"
-        );
+        // Each gets its own file, named the same alone or beside the other.
+        assert_ne!(file_name(&docs[0]), file_name(&docs[1]));
+        let alone = documents(
+            crate::zip::read(&crate::zip::write(&[("a.xml", DOC.as_bytes())])).unwrap(),
+            "1001",
+        )
+        .documents;
+        assert_eq!(file_name(&alone[0]), file_name(&docs[0]));
+        assert!(file_name(&docs[0]).ends_with(&format!("_{}.xml", &docs[0].id[20..])));
+    }
+
+    #[test]
+    fn a_title_reads_whole_across_references_and_lines() {
+        let h = header(
+            b"<ClinicalDocument xmlns=\"urn:hl7-org:v3\"><title>Care &#38; Plan\n   &lt;Notes&gt; &amp;\r\n Summary</title><code code=\"34133-9\" codeSystem=\"2.16.840.1.113883.6.1\" displayName=\"A &amp; B\"/></ClinicalDocument>",
+        )
+        .unwrap();
+        assert_eq!(h.title.as_deref(), Some("Care & Plan <Notes> & Summary"));
+        assert_eq!(h.code.as_deref(), Some("34133-9"));
+        assert_eq!(h.code_display.as_deref(), Some("A & B"));
     }
 
     #[test]

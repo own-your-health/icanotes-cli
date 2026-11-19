@@ -75,8 +75,8 @@ fn download(ctx: &Ctx, args: &DownloadArgs) -> Result<(), CliError> {
         private_file::create_dir_all(&args.output)
             .map_err(|e| CliError::Other(format!("creating {}: {e}", args.output.display())))?;
         let mut saved = Vec::new();
-        for (d, name) in docs.iter().zip(ccd::file_names(&docs)) {
-            saved.push(write(d, &args.output.join(name), args.force)?);
+        for d in &docs {
+            saved.push(write(d, &args.output.join(ccd::file_name(d)), args.force)?);
         }
         let batch = DownloadBatch::new(args.output.display().to_string(), saved);
         pk_cli_documents::emit(&batch, ctx.json());

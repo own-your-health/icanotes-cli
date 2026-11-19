@@ -157,7 +157,11 @@ Error bodies are never printed: they may quote the request.
   `rate.json` beside the config, read and written under a lock on
   `rate.lock`, so one run's requests count against the next and two runs at
   once (two profiles' exports, an export and `auth status --check`) share
-  one window. Each request takes its slot before it is sent. When
+  one window. Each request takes its slot before it is sent, and an answer
+  counted in the same window (a reset within a minute of the stored one)
+  never raises the count another run lowered; one counted in the window
+  before, arriving late, is ignored. A `rate.json` that does not read is
+  refused rather than taken as a fresh window, which could forget a 429. When
   `Remaining` is 0 it waits until the reset (and says so on stderr), and
   refuses instead when the wait is longer than `--max-wait` (default 16
   minutes). When an answer says the window is used up without a reset
@@ -184,6 +188,10 @@ stream, as medrec expects of documents:
   `contentType: application/xml`, `url: Binary/<id>`, size, title and
   creation date.
 - The Binary carries the file's bytes unchanged, base64.
+- `documents download` names a file by the day, the title and the last 8
+  characters of the id (`2020-01-02_Continuity_of_Care_Document_861989cb.xml`),
+  so two of one day and title never share a file and a document keeps its
+  name on every download.
 - icanotes reads only the header (code, title, effective time), stopping at
   the patient, author, custodian or body; its XML errors quote nothing.
 

@@ -569,12 +569,14 @@ fn the_export_waits_out_icanotes_window_of_ten() {
     let mock = Mock::start();
     let dir = tmp();
     let ctx = ctx(&dir, &mock);
-    login(&ctx, None).unwrap();
     // A two-second window keeps the test short; ICANotes' is ten minutes.
+    // Set before the login's request, so every answer counts in it.
     mock.window(10, 2);
+    login(&ctx, None).unwrap();
     let started = std::time::Instant::now();
     let (bytes, r) = export_bytes(&ctx, None);
-    assert!(r.unwrap().is_none());
+    let ended = r.unwrap();
+    assert!(ended.is_none(), "{:?}", ended.map(|e| e.to_string()));
     let got = read(&bytes);
     assert!(got.trailer.complete, "{:?}", got.trailer);
     assert_eq!(count(&got, "Binary"), 1);
@@ -636,7 +638,15 @@ fn documents_download_writes_the_ccd() {
         .collect();
     assert_eq!(files.len(), 1, "{files:?}");
     let name = files[0].to_string_lossy().into_owned();
-    assert_eq!(name, "2020-01-02_Continuity_of_Care_Document.xml");
+    // The day, the title and the end of the document's id.
+    assert!(
+        name.starts_with("2020-01-02_Continuity_of_Care_Document_") && name.ends_with(".xml"),
+        "{name}"
+    );
+    assert_eq!(
+        name.len(),
+        "2020-01-02_Continuity_of_Care_Document_".len() + 8 + 4
+    );
     assert_eq!(std::fs::read(out.join(&name)).unwrap(), mock::CCD);
     #[cfg(unix)]
     {

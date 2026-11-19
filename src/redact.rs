@@ -15,6 +15,8 @@
 //! percent-encoded, or as HTML, never reaches the output. A value is ASCII
 //! with no whitespace (`credential.rs`), so no value spans two tokens.
 
+use std::borrow::Cow;
+
 /// What a redacted value is replaced with.
 pub const REDACTED: &str = "[redacted]";
 
@@ -90,9 +92,12 @@ impl Redactor {
         if self.values.is_empty() {
             return b.to_vec();
         }
-        let mut out = b.to_vec();
+        // A clean answer is borrowed through every needle, not copied.
+        let mut out: Cow<[u8]> = Cow::Borrowed(b);
         for n in &self.needles {
-            out = replace_all(&out, n);
+            if find(&out, n).is_some() {
+                out = Cow::Owned(replace_all(&out, n));
+            }
         }
         self.tokens(&out)
     }
@@ -122,9 +127,15 @@ impl Redactor {
     }
 
     fn hidden_in(&self, token: &[u8]) -> bool {
+        let encoded =
+            |t: &[u8]| t.contains(&b'%') || t.contains(&b'\\') || find(t, b"&#").is_some();
+        // Most tokens hold nothing to decode: checked before any copy.
+        if !encoded(token) {
+            return false;
+        }
         let mut cur = token.to_vec();
         for _ in 0..DEPTH {
-            if !(cur.contains(&b'%') || cur.contains(&b'\\') || find(&cur, b"&#").is_some()) {
+            if !encoded(&cur) {
                 return false;
             }
             let next = html_decode(&json_unescape(&percent_decode(&cur)));

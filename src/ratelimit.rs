@@ -31,6 +31,9 @@ pub const DEFAULT_MAX_WAIT: Duration = Duration::from_secs(16 * 60);
 /// How long a window is taken to last when an answer says it is used up
 /// but not when it resets: a little over the ten-odd minutes seen.
 pub const ASSUMED_WINDOW_SECS: i64 = 11 * 60;
+/// Resets within this of the stored one name the same window: a server
+/// that counts the reset from each answer moves it by a second or two.
+const SAME_WINDOW_SECS: i64 = 60;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Window {
@@ -141,20 +144,37 @@ impl RateLimiter {
         }
         lock.lock()
             .map_err(|e| CliError::Other(format!("locking {}: {e}", lock_path.display())))?;
-        let mut w: Window = std::fs::read(path)
-            .ok()
-            .and_then(|b| serde_json::from_slice(&b).ok())
-            .unwrap_or_default();
+        // Only a missing file is a fresh window. icanotes replaces the file
+        // whole (a rename), so one that does not read was changed by
+        // something else, and starting afresh could forget a 429's block:
+        // refuse instead.
+        let mut w: Window = match std::fs::read(path) {
+            Ok(b) => serde_json::from_slice(&b).map_err(|_| {
+                CliError::Other(format!(
+                    "{} does not read as icanotes' request window",
+                    path.display()
+                ))
+                .with_remedy(format!(
+                    "remove it once 15 minutes have passed since the last request: rm {}",
+                    path.display()
+                ))
+            })?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Window::default(),
+            Err(e) => {
+                return Err(CliError::Other(format!("reading {}: {e}", path.display())));
+            }
+        };
         let before = w.clone();
         let out = f(&mut w);
         if w != before {
-            if let Ok(bytes) = serde_json::to_vec(&w) {
-                let _ = pk_cli_core::private_file::write(
-                    path,
-                    &bytes,
-                    pk_cli_core::private_file::Replace::Always,
-                );
-            }
+            let bytes = serde_json::to_vec(&w)
+                .map_err(|e| CliError::Other(format!("serializing the request window: {e}")))?;
+            pk_cli_core::private_file::write(
+                path,
+                &bytes,
+                pk_cli_core::private_file::Replace::Always,
+            )
+            .map_err(|e| CliError::Other(format!("writing {}: {e}", path.display())))?;
         }
         *cached = w;
         drop(lock);
@@ -238,17 +258,44 @@ impl RateLimiter {
                 .map(|(_, v)| v.trim().to_string())
         };
         let num = |name: &str| header(name).and_then(|v| v.parse::<i64>().ok());
-        let _ = self.update(|w| {
+        let updated = self.update(|w| {
             if let Some(l) = num("x-ratelimit-limit") {
                 w.limit = u32::try_from(l).ok();
             }
-            if let Some(r) = num("x-ratelimit-reset") {
-                // Unix seconds as ICANotes sends it; a small number is
-                // seconds from now, as some servers send it.
-                w.reset = Some(if r > 1_000_000_000 { r } else { now + r });
-            }
-            if let Some(r) = num("x-ratelimit-remaining") {
-                w.remaining = u32::try_from(r.max(0)).ok();
+            // Unix seconds as ICANotes sends it; a small number is seconds
+            // from now, as some servers send it.
+            let reset =
+                num("x-ratelimit-reset").map(|r| if r > 1_000_000_000 { r } else { now + r });
+            // ICANotes' windows are of one length, so an answer's reset
+            // says which window it counted in: well past the stored one, a
+            // new window, taken as it comes; well before it, the window
+            // before, answered late, and ignored; near it, the same window,
+            // where an answer to a request sent before another run took a
+            // slot would undo that slot, so the lower count and the later
+            // reset stand.
+            let remaining = num("x-ratelimit-remaining").map(|r| u32::try_from(r.max(0)).ok());
+            match (reset, w.reset) {
+                (Some(r), Some(stored)) if r > stored + SAME_WINDOW_SECS => {
+                    w.reset = Some(r);
+                    if let Some(c) = remaining {
+                        w.remaining = c;
+                    }
+                }
+                (Some(r), Some(stored)) if r < stored - SAME_WINDOW_SECS => {}
+                (r, stored) => {
+                    if let Some(r) = r {
+                        w.reset = Some(stored.map_or(r, |s| s.max(r)));
+                    }
+                    // With no reset to tell windows apart, the count still
+                    // only falls: a used-up one is waited out (an assumed
+                    // window), after which the next answer's count stands.
+                    if let Some(c) = remaining {
+                        w.remaining = match (w.remaining, c) {
+                            (Some(stored), Some(c)) => Some(stored.min(c)),
+                            _ => c,
+                        };
+                    }
+                }
             }
             if w.remaining == Some(0) && !w.reset.is_some_and(|r| r >= now) {
                 w.reset = Some(now + ASSUMED_WINDOW_SECS);
@@ -268,6 +315,10 @@ impl RateLimiter {
                 w.blocked_until = None;
             }
         });
+        if let Err(e) = updated {
+            // The next request's `before` meets the same error and stops.
+            (self.note)(&format!("could not record ICANotes' request window: {e}"));
+        }
     }
 }
 
@@ -399,6 +450,95 @@ mod tests {
         assert_eq!(slept.load(Ordering::SeqCst), 0);
         b.before().unwrap();
         assert_eq!(slept.load(Ordering::SeqCst), 101);
+    }
+
+    #[test]
+    fn a_late_answer_does_not_undo_a_slot_another_run_took() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rate.json");
+        let now = Arc::new(AtomicI64::new(T0));
+        let slept = Arc::new(AtomicI64::new(0));
+        let a = limiter(now.clone(), slept.clone(), Some(path.clone()));
+        let b = limiter(now.clone(), slept.clone(), Some(path.clone()));
+        a.after(200, &headers(2, T0 + 100));
+        b.before().unwrap(); // b's request, answered below
+        a.before().unwrap(); // a takes the last slot
+        b.after(200, &headers(1, T0 + 100)); // b's answer, sent before a's
+        assert_eq!(b.window().remaining, Some(0));
+        b.before().unwrap();
+        assert_eq!(slept.load(Ordering::SeqCst), 101);
+        // A new window's count is taken as it comes.
+        b.after(200, &headers(9, T0 + 800));
+        assert_eq!(b.window().remaining, Some(9));
+        // A reset a little later in the same window moves the wait later,
+        // never earlier.
+        b.after(200, &headers(5, T0 + 805));
+        assert_eq!(b.window().reset, Some(T0 + 805));
+        b.after(200, &headers(4, T0 + 790));
+        assert_eq!(b.window().reset, Some(T0 + 805));
+        assert_eq!(b.window().remaining, Some(4));
+        // An answer from the window before, arriving late, changes nothing.
+        b.after(200, &headers(7, T0 + 100));
+        assert_eq!(b.window().reset, Some(T0 + 805));
+        assert_eq!(b.window().remaining, Some(4));
+    }
+
+    #[test]
+    fn runs_at_once_take_exactly_the_slots_there_are() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rate.json");
+        const SLOTS: i64 = 5;
+        const RUNS: usize = 48;
+        let seed = RateLimiter::new(Some(path.clone()), Duration::ZERO, Box::new(|_| {}));
+        seed.after(200, &headers(SLOTS, now() + 3600));
+        let start = Arc::new(std::sync::Barrier::new(RUNS));
+        let handles: Vec<_> = (0..RUNS)
+            .map(|_| {
+                let (path, start) = (path.clone(), start.clone());
+                std::thread::spawn(move || {
+                    // Its own limiter and file handles, as another process
+                    // would have; a wait is refused (max_wait 0), not slept.
+                    let r = RateLimiter::new(Some(path), Duration::ZERO, Box::new(|_| {}));
+                    start.wait();
+                    r.before().is_ok()
+                })
+            })
+            .collect();
+        let sent = handles
+            .into_iter()
+            .map(|h| h.join().unwrap())
+            .filter(|ok| *ok)
+            .count();
+        assert_eq!(sent as i64, SLOTS);
+    }
+
+    #[test]
+    fn a_window_file_that_does_not_read_refuses_rather_than_forgets() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rate.json");
+        let now = Arc::new(AtomicI64::new(T0));
+        let slept = Arc::new(AtomicI64::new(0));
+        let notes = Arc::new(Mutex::new(Vec::<String>::new()));
+        let n = notes.clone();
+        let t = now.clone();
+        let r = RateLimiter::new(
+            Some(path.clone()),
+            DEFAULT_MAX_WAIT,
+            Box::new(move |m| n.lock().unwrap().push(m.to_string())),
+        )
+        .with_time(Box::new(move || t.load(Ordering::SeqCst)), Box::new(|_| {}));
+        r.after(429, &[]);
+        std::fs::write(&path, b"{\"blocked_until\": tor").unwrap();
+        let e = r.before().unwrap_err();
+        assert!(e.to_string().contains("does not read"), "{e}");
+        assert!(e.remedy().unwrap().contains("rm "), "{e}");
+        r.after(200, &headers(5, T0 + 100));
+        assert!(
+            notes.lock().unwrap()[0].contains("could not record"),
+            "{:?}",
+            notes.lock().unwrap()
+        );
+        let _ = slept;
     }
 
     #[test]
