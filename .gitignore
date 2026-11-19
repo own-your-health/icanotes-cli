@@ -1,0 +1,19 @@
+/target
+**/*.rs.bk
+Cargo.lock.orig
+.DS_Store
+
+# Never commit raw captures or exports. A record pulled from a real
+# organization is medical data; only synthetic fixtures belong in git
+# (tests/fixtures/README.md).
+/captures
+/exports
+*.har
+*.raw.json
+*.ndjson
+!tests/fixtures/*.ndjson
+
+# Downloaded C-CDA archives.
+*.zip
+*.xml
+!tests/fixtures/*.xml

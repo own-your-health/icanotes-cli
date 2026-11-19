@@ -1,0 +1,1 @@
+[{"resource":{"resourceType":"Procedure","id":"MU2014-SYN-160001-procedure","status":"completed","code":{"text":"Example procedure"},"subject":{"reference":"Patient/MU2014-SYN-100001"},"performedDateTime":"2019-06-01T00:00:00+05:00"},"request":{"method":"POST"}}]

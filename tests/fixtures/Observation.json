@@ -1,0 +1,85 @@
+[
+    {
+        "resource": {
+            "resourceType": "Observation",
+            "id": "MU2014-SYN-130001-vitals-height",
+            "meta": {
+                "profile": [
+                    "http://hl7.org/fhir/StructureDefinition/vitalsigns"
+                ]
+            },
+            "status": "final",
+            "category": [
+                {
+                    "coding": [
+                        {
+                            "system": "http://hl7.org/fhir/observation-category",
+                            "code": "vital-signs",
+                            "display": "Vital Signs"
+                        }
+                    ],
+                    "text": "Vital Signs"
+                }
+            ],
+            "code": {
+                "coding": [
+                    {
+                        "system": "http://loinc.org",
+                        "code": "8302-2",
+                        "display": "Body height"
+                    }
+                ],
+                "text": "Body height"
+            },
+            "subject": {
+                "reference": "Patient/MU2014-SYN-100001"
+            },
+            "effectiveDateTime": "2020-01-02T10:30:00+05:00",
+            "valueQuantity": {
+                "value": 170,
+                "unit": "cm",
+                "system": "http://unitsofmeasure.org",
+                "code": "cm"
+            }
+        },
+        "request": {
+            "method": "POST"
+        }
+    },
+    {
+        "resource": {
+            "resourceType": "Observation",
+            "id": "MU2014-SYN-130002-social",
+            "status": "final",
+            "category": [
+                {
+                    "coding": [
+                        {
+                            "system": "http://hl7.org/fhir/observation-category",
+                            "code": "social-history"
+                        }
+                    ]
+                }
+            ],
+            "code": {
+                "coding": [
+                    {
+                        "system": "http://loinc.org",
+                        "code": "72166-2",
+                        "display": "Tobacco smoking status"
+                    }
+                ]
+            },
+            "subject": {
+                "reference": "Patient/MU2014-SYN-100001"
+            },
+            "issued": "2020-01-02T10:30:00+05:00",
+            "valueCodeableConcept": {
+                "text": "Never smoker"
+            }
+        },
+        "request": {
+            "method": "POST"
+        }
+    }
+]

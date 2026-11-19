@@ -1,0 +1,61 @@
+[package]
+name = "icanotes-cli"
+description = "Pull your own records from a practice on ICANotes (patientonlineportal.com) through ICANotes' patient API key. Unofficial; not affiliated with or endorsed by ICANotes."
+version = "0.1.0"
+edition = "2021"
+# pk-cli-auth's refresh lock (File::lock) needs 1.89.
+rust-version = "1.89"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/piekstra/icanotes-cli"
+authors = ["piekstra"]
+keywords = ["fhir", "c-cda", "icanotes", "health-records"]
+categories = ["command-line-utilities"]
+publish = false
+
+[lib]
+name = "icanotes"
+path = "src/lib.rs"
+
+[[bin]]
+name = "icanotes"
+path = "src/main.rs"
+
+[dependencies]
+# Every pk-cli-* on the cli-common tag medical-common pins (its DESIGN.md §5):
+# two tags in one build are two copies of every pk-cli-core type.
+pk-cli-core = { git = "https://github.com/piekstra/cli-common", tag = "v0.33.2", features = ["reqwest"] }
+pk-cli-secrets = { git = "https://github.com/piekstra/cli-common", tag = "v0.33.2" }
+pk-cli-auth = { git = "https://github.com/piekstra/cli-common", tag = "v0.33.2" }
+pk-cli-config = { git = "https://github.com/piekstra/cli-common", tag = "v0.33.2" }
+pk-cli-selfupdate = { git = "https://github.com/piekstra/cli-common", tag = "v0.33.2" }
+pk-cli-documents = { git = "https://github.com/piekstra/cli-common", tag = "v0.33.2" }
+# The portal sign-in window, in the profile's own Chrome profile.
+pk-cli-browser = { git = "https://github.com/piekstra/cli-common", tag = "v0.33.2" }
+pk-med-records = { git = "https://github.com/piekstra/medical-common", tag = "v0.6.2" }
+pk-med-fhir = { git = "https://github.com/piekstra/medical-common", tag = "v0.6.2" }
+clap = { version = "4", features = ["derive", "env"] }
+clap_complete = "4"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order", "raw_value"] }
+# The patient API answers the C-CDA as a ZIP of bytes, which pk-cli-http's
+# text transport cannot carry, so the client is reqwest itself: no redirects,
+# no cookies, errors without their URL (the query carries the key).
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+url = "2"
+base64 = "0.22"
+sha2 = "0.10"
+# The ZIP's deflated entries.
+flate2 = "1"
+# The C-CDA header (title, type, date) for its DocumentReference.
+quick-xml = "0.37"
+
+[dev-dependencies]
+pk-med-records = { git = "https://github.com/piekstra/medical-common", tag = "v0.6.2", features = ["test-util"] }
+assert_cmd = "2"
+predicates = "3"
+tempfile = "3"
+
+[profile.release]
+strip = true
+lto = true
+opt-level = "z"

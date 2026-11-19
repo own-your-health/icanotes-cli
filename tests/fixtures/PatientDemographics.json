@@ -1,0 +1,101 @@
+[
+    {
+        "resource": {
+            "resourceType": "Patient",
+            "id": "MU2014-SYN-100001",
+            "meta": {
+                "lastUpdated": "2020-01-02T10:30:00+05:00"
+            },
+            "extension": [
+                {
+                    "url": "http://hl7.org/fhir/us/core/StructureDefinition/us-core-race",
+                    "extension": [
+                        {
+                            "url": "ombCategory",
+                            "valueCoding": {
+                                "system": "urn:oid:2.16.840.1.113883.6.238",
+                                "code": "2131-1",
+                                "display": "Other Race"
+                            }
+                        },
+                        {
+                            "url": "text",
+                            "valueString": "Other Race"
+                        }
+                    ]
+                },
+                {
+                    "url": "http://hl7.org/fhir/us/core/StructureDefinition/us-core-birthsex",
+                    "valueCode": "UNK"
+                }
+            ],
+            "identifier": [
+                {
+                    "use": "usual",
+                    "type": {
+                        "coding": [
+                            {
+                                "system": "http://hl7.org/fhir/v2/0203",
+                                "code": "MR",
+                                "display": "Medical Record Number"
+                            }
+                        ]
+                    },
+                    "system": "urn:oid:0.0.0",
+                    "value": "100001"
+                }
+            ],
+            "active": true,
+            "name": [
+                {
+                    "use": "official",
+                    "family": "Testpatient",
+                    "given": [
+                        "Alex"
+                    ]
+                }
+            ],
+            "telecom": [
+                {
+                    "system": "phone",
+                    "value": "(555) 010-0001",
+                    "use": "home"
+                },
+                {
+                    "system": "email",
+                    "value": "alex@example.com"
+                }
+            ],
+            "gender": "unknown",
+            "birthDate": "1900-01-01",
+            "address": [
+                {
+                    "line": [
+                        "100 Example St"
+                    ],
+                    "city": "Exampleton",
+                    "state": "EX",
+                    "postalCode": "00000",
+                    "country": "US"
+                }
+            ],
+            "communication": [
+                {
+                    "language": {
+                        "coding": [
+                            {
+                                "system": "urn:ietf:bcp:47",
+                                "code": "en",
+                                "display": "English"
+                            }
+                        ]
+                    },
+                    "preferred": true
+                }
+            ]
+        },
+        "request": {
+            "method": "POST"
+        }
+    }
+]
