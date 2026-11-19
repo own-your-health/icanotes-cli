@@ -282,7 +282,7 @@ pub fn run<W: Write>(
                             &d.id,
                             skip::TOO_LARGE,
                             format!(
-                                "the document is {} bytes, over what one stream line carries as base64; `icanotes documents download {}` saves it",
+                                "the document is {} bytes, over what one stream line carries as base64; `icanotes documents download --profile <NAME> {} -o <FILE>` saves it",
                                 d.bytes.len(),
                                 d.id
                             ),

@@ -129,7 +129,7 @@ no consent screen: the key and secret are the patient's.
 - A stream line holds at most 64 MiB, so a document over about 48 MiB
   cannot travel as a base64 Binary. The export skips it whole
   (`too_large`, naming its id), DocumentReference included, so nothing
-  points at a missing Binary; `documents download <id>` saves it.
+  points at a missing Binary; `documents download <id> -o <FILE>` saves it.
 
 ## Statuses
 
