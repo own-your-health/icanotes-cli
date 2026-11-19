@@ -112,7 +112,8 @@ fn the_ccd_is_the_dummy() {
     }
     // The mock's ZIP holds it beside the stylesheet, which is not a document.
     let entries = icanotes::zip::read(&mock::ccd_zip()).unwrap();
-    let (docs, other) = icanotes::ccd::documents(entries, mock::PATIENT_ID).unwrap();
-    assert_eq!(docs.len(), 1);
-    assert_eq!(other, 1);
+    let a = icanotes::ccd::documents(entries, mock::PATIENT_ID);
+    assert_eq!(a.documents.len(), 1);
+    assert_eq!(a.other, 1);
+    assert!(a.unreadable.is_empty(), "{:?}", a.unreadable);
 }

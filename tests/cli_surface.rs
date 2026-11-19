@@ -438,6 +438,41 @@ fn config_round_trips() {
 }
 
 #[test]
+fn a_config_edited_to_send_the_key_elsewhere_is_refused() {
+    let home = tmp();
+    icanotes(&home)
+        .args(["profiles", "add", "adult1"])
+        .assert()
+        .success();
+    let path = home.join("config/icanotes/config.json");
+    let mut c: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    c["api_base"] = "http://example.net/API".into();
+    std::fs::write(&path, serde_json::to_vec(&c).unwrap()).unwrap();
+    for args in [
+        &["records", "export", "--profile", "adult1", "--ndjson"][..],
+        &["api", "GET", "Goal", "--profile", "adult1"],
+        &["auth", "status", "--profile", "adult1", "--check"],
+    ] {
+        let out = icanotes(&home).args(args).output().unwrap();
+        assert_eq!(out.status.code(), Some(2), "{args:?}");
+        assert!(out.stdout.is_empty(), "{args:?}");
+        let text = String::from_utf8_lossy(&out.stderr);
+        assert!(text.contains("the config's api_base"), "{args:?}: {text}");
+    }
+    // `config` still shows it, and unsets it.
+    let v = stdout_json(icanotes(&home).args(["config", "show", "--json"]));
+    assert_eq!(v["api_base"], "http://example.net/API");
+    icanotes(&home)
+        .args(["config", "unset", "api_base"])
+        .assert()
+        .success();
+    icanotes(&home)
+        .args(["records", "export", "--profile", "adult1", "--ndjson"])
+        .assert()
+        .code(3);
+}
+
+#[test]
 fn no_color_is_accepted() {
     let home = tmp();
     icanotes(&home)

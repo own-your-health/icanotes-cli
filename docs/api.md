@@ -38,8 +38,12 @@ no consent screen: the key and secret are the patient's.
 - A pair: `userKey` and `userSecret`. Every request carries both **as query
   parameters** (`?userKey=…&userSecret=…`). So a request URL is a credential:
   icanotes never logs one, strips URLs from transport errors
-  (`reqwest::Error::without_url`), and redacts both values, raw and
-  URL-encoded, from every error and from `api` output (`src/redact.rs`).
+  (`reqwest::Error::without_url`), and redacts both values from every error
+  and from `api` output (`src/redact.rs`): as written and percent-encoded in
+  place, and in any other spelling an upstream may echo them in (lowercase
+  or partial percent-encoding, doubly encoded, JSON-escaped like
+  `\/` and `\u002B`, HTML character references) by replacing the whole
+  token that decodes to one.
 - They do not expire. The docs: "userTokens do not get deleted unless you
   delete them from the Patient Portal page yourself."
 - Generating does not replace earlier pairs. The docs: there is "no need to
@@ -101,10 +105,12 @@ no consent screen: the key and secret are the patient's.
 - Empty strings stand for absent values in places
   (`MedicationRequest.dispenseRequest.validityPeriod.start: ""`). Passed
   through unchanged.
-- The docs' CareTeam sample has no `id`. A stream needs one per resource, so
-  icanotes gives a resource without one `icanotes-<type>-<n>`, numbered in
-  the order the endpoint answered, inserted right after `resourceType`. It
-  is the same on every export while ICANotes answers in the same order.
+- The docs' CareTeam sample has no `id`, and empty strings stand in for
+  absent values, so an id may be missing, `""` or `null`. icanotes passes
+  such a resource through as sent; the stream always writes a resource
+  without an id, and medrec (0.2.7 and later) names it by its content.
+  icanotes gives none an id of its own: one numbered by answer order would
+  move to another resource when the order changes.
 - Resource ids look like `MU2014-<number>`, `MU2014-<GUID>` or
   `MU2014-<number>-<suffix>`; the Patient's is `MU2014-<patient id>`, and
   every `subject` or `patient` reference names it.
@@ -116,8 +122,14 @@ no consent screen: the key and secret are the patient's.
   publishes a stylesheet for them at https://www.icanotes.com/api/CDA.xsl.
   icanotes reads the ZIP itself (`src/zip.rs`: stored and deflated entries,
   CRC-checked, no ZIP64, encryption or multi-disk, at most 500 entries and
-  64 MiB each), keeps the `.xml` entries, and checks `documentCount`
-  against them (a mismatch is a skip, not a failure).
+  64 MiB each), keeps the `.xml` entries that read as a ClinicalDocument,
+  and checks `documentCount` against them (a mismatch is a skip, not a
+  failure). An `.xml` entry that is not one (an IHE XDM `METADATA.XML`)
+  is a skip, and the others are kept.
+- A stream line holds at most 64 MiB, so a document over about 48 MiB
+  cannot travel as a base64 Binary. The export skips it whole
+  (`too_large`, naming its id), DocumentReference included, so nothing
+  points at a missing Binary; `documents download <id>` saves it.
 
 ## Statuses
 
@@ -142,11 +154,16 @@ Error bodies are never printed: they may quote the request.
   carried `X-RateLimit-Reset`, in Unix seconds, about ten minutes ahead.
 - An export makes 13 requests (`PatientDemographics`, the 11 searches,
   `PatientCCD`), so it waits out one window. icanotes keeps the window in
-  `rate.json` beside the config, so one run's requests count against the
-  next: when `Remaining` is 0 it waits until the reset (and says so on
-  stderr), and refuses instead when the wait is longer than `--max-wait`
-  (default 16 minutes). After a 429 it sends nothing until 15 minutes have
-  passed. medrec's import timeout (30 minutes) covers one wait.
+  `rate.json` beside the config, read and written under a lock on
+  `rate.lock`, so one run's requests count against the next and two runs at
+  once (two profiles' exports, an export and `auth status --check`) share
+  one window. Each request takes its slot before it is sent. When
+  `Remaining` is 0 it waits until the reset (and says so on stderr), and
+  refuses instead when the wait is longer than `--max-wait` (default 16
+  minutes). When an answer says the window is used up without a reset
+  time, it takes the window to last 11 minutes. After a 429 it sends
+  nothing until 15 minutes have passed, whichever run met it. medrec's
+  import timeout (30 minutes) covers one wait.
 - `auth login --browser` checks a pair once (one `PatientID` request) and
   remembers the answer while the page keeps showing it.
 
@@ -196,5 +213,9 @@ first real `auth login --browser`, as shapes and counts only:
   dates each type by, not the clinical date.
 - **STU3, not R4.** A consumer reading R4 shapes finds `clinicalStatus` a
   string.
-- **No id on CareTeam.** Without one assigned, every pull would add another
-  copy of it to a store.
+- **No id on CareTeam.** An id assigned by answer order would give one
+  team's id to another when the order changes, and a store would overwrite
+  one with the other. icanotes leaves it out; the store names it by content.
+- **An answer can echo the query.** An error body or a passthrough answer
+  may repeat the key and secret in any encoding; `api` output passes
+  through the redactor, pretty-printed output a second time.

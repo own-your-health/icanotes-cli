@@ -101,7 +101,15 @@ impl Ctx {
         self.common.json
     }
 
+    /// The config, its hosts checked ([`Config::check`]).
     pub fn config(&self) -> Result<Config, CliError> {
+        let c: Config = self.store.load()?;
+        c.check()?;
+        Ok(c)
+    }
+
+    /// The config as stored, for `config show|set|unset` to show and fix.
+    pub fn config_unchecked(&self) -> Result<Config, CliError> {
         self.store.load()
     }
 

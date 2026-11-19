@@ -1,7 +1,7 @@
 BIN := icanotes
 CARGO ?= cargo
 
-.PHONY: build release test lint fmt fmt-check clean install deps smoke verify dev mock
+.PHONY: build release test lint fmt fmt-check clean install deps smoke verify dev mock check-key-expression
 
 # Every target that produces a binary signs it. `cargo build` and
 # `cargo install` ad-hoc sign, minting a new code identity each time, and
@@ -83,3 +83,9 @@ if [ -x "$$HOME/Dev/cli-common/scripts/dev-sign.sh" ]; then \
 	"$$HOME/Dev/cli-common/scripts/dev-sign.sh" "$(SIGN_TARGET)"; \
 else echo "cli-common/scripts/dev-sign.sh not found — $(SIGN_TARGET) left ad-hoc signed"; fi
 endef
+
+# The login page script against synthetic portal pages, in headless Chromium.
+# Needs PLAYWRIGHT_DIR (a directory whose node_modules has playwright); not
+# part of verify.
+check-key-expression:
+	node scripts/check-key-expression.mjs

@@ -167,21 +167,37 @@ impl Config {
     pub fn set(&mut self, key: &str, value: &str) -> Result<(), CliError> {
         match key {
             "api_base" => {
-                pk_cli_core::transport::require_secure_url(value)?;
-                if !(is_icanotes(value) || is_loopback(value)) {
-                    return Err(CliError::Usage(
-                        "api_base is ICANotes' (https on icanotes.com) or a test server on this machine; the API key goes nowhere else".into(),
-                    ));
-                }
+                check_api_base(value)?;
                 self.api_base = Some(pk_med_fhir::normalize_base(value));
             }
             "portal_url" => {
-                pk_cli_core::transport::require_secure_url(value)?;
-                url::Url::parse(value)
-                    .map_err(|_| CliError::Usage(format!("`{value}` is not a URL")))?;
+                check_portal_url(value)?;
                 self.portal_url = Some(value.to_string());
             }
             other => return Err(unknown(other)),
+        }
+        Ok(())
+    }
+
+    /// The stored `api_base` and `portal_url` checked as `set` checks them,
+    /// for a config written by hand or named by `--config`: the stored key
+    /// goes to `api_base`, so a host anywhere else is refused before the
+    /// vault is read.
+    pub fn check(&self) -> Result<(), CliError> {
+        let fix = |key: &str| {
+            format!("`icanotes config unset {key}` returns to ICANotes' own, or `icanotes config set {key} <URL>`")
+        };
+        if let Some(v) = &self.api_base {
+            check_api_base(v).map_err(|e| {
+                CliError::Usage(format!("the config's api_base: {}", e.message()))
+                    .with_remedy(fix("api_base"))
+            })?;
+        }
+        if let Some(v) = &self.portal_url {
+            check_portal_url(v).map_err(|e| {
+                CliError::Usage(format!("the config's portal_url: {}", e.message()))
+                    .with_remedy(fix("portal_url"))
+            })?;
         }
         Ok(())
     }
@@ -194,6 +210,22 @@ impl Config {
         }
         Ok(())
     }
+}
+
+fn check_api_base(value: &str) -> Result<(), CliError> {
+    pk_cli_core::transport::require_secure_url(value)?;
+    if !(is_icanotes(value) || is_loopback(value)) {
+        return Err(CliError::Usage(
+            "api_base is ICANotes' (https on icanotes.com) or a test server on this machine; the API key goes nowhere else".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn check_portal_url(value: &str) -> Result<(), CliError> {
+    pk_cli_core::transport::require_secure_url(value)?;
+    url::Url::parse(value).map_err(|_| CliError::Usage(format!("`{value}` is not a URL")))?;
+    Ok(())
 }
 
 fn unknown(key: &str) -> CliError {
@@ -262,6 +294,16 @@ mod tests {
         assert_eq!(c.api_base(), "http://127.0.0.1:9/API");
         c.unset("api_base").unwrap();
         assert_eq!(c.api_base(), API_BASE);
+        // A config written by hand is held to the same rule.
+        c.api_base = Some("http://example.net/API".into());
+        let e = c.check().unwrap_err();
+        assert_eq!(e.exit_code(), 2);
+        assert!(e.remedy().unwrap().contains("config unset api_base"));
+        c.api_base = Some("https://r2.icanotes.com/API".into());
+        c.portal_url = Some("http://patientonlineportal.com/".into());
+        assert_eq!(c.check().unwrap_err().exit_code(), 2);
+        c.portal_url = None;
+        c.check().unwrap();
         assert_eq!(c.set("nope", "x").unwrap_err().exit_code(), 2);
     }
 

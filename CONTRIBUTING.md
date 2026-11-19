@@ -28,6 +28,12 @@
   beside the config (`vault.<service>/`), and `auth logout --forget` deletes
   its key item once nothing is left in it.
 
+- A change to `KEY_EXPRESSION` in `src/login.rs` (the script that reads the
+  key off the portal page) is checked against synthetic portal pages, decoy
+  labels and buttons included, in headless Chromium:
+  `PLAYWRIGHT_DIR=<dir whose node_modules has playwright> make
+  check-key-expression`. CI has no browser, so this is not part of
+  `make verify`.
 - Test data is invented. Never commit a real response, record, export or
   ICANotes' documentation; `tests/no_personal_data.rs` and gitleaks check
   every change.

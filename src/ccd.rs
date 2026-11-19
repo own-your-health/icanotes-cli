@@ -152,36 +152,50 @@ fn attr(e: &quick_xml::events::BytesStart, key: &[u8]) -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
-/// The documents in an archive's entries: its `.xml` files, each with its
-/// stable id. Other files (a stylesheet) are counted, not kept.
-pub fn documents(
-    entries: Vec<ZipEntry>,
-    patient_id: &str,
-) -> Result<(Vec<CcdDocument>, usize), CliError> {
-    let mut out: Vec<CcdDocument> = Vec::new();
-    let mut other = 0;
+/// What an archive holds.
+#[derive(Debug, Default)]
+pub struct Archive {
+    /// Its C-CDA documents, each with its stable id.
+    pub documents: Vec<CcdDocument>,
+    /// Files that are not `.xml` (a stylesheet): counted, not kept.
+    pub other: usize,
+    /// For each `.xml` file that did not read as a C-CDA document (an IHE
+    /// XDM `METADATA.XML`, a file in another encoding), why, naming
+    /// nothing in it. The others are kept.
+    pub unreadable: Vec<String>,
+}
+
+/// The documents in an archive's entries.
+pub fn documents(entries: Vec<ZipEntry>, patient_id: &str) -> Archive {
+    let mut out = Archive::default();
     for e in entries {
         if !e.name.to_ascii_lowercase().ends_with(".xml") {
-            other += 1;
+            out.other += 1;
             continue;
         }
-        let header = header(&e.bytes)?;
+        let header = match header(&e.bytes) {
+            Ok(h) => h,
+            Err(err) => {
+                out.unreadable.push(err.message().to_string());
+                continue;
+            }
+        };
         let mut id = document_id(patient_id, &header, &e.name);
         // Two documents the same in type, time and title: told apart by
         // their order in the archive.
         let mut n = 1;
-        while out.iter().any(|d| d.id == id) {
+        while out.documents.iter().any(|d| d.id == id) {
             n += 1;
             id = format!("{}-{n}", document_id(patient_id, &header, &e.name));
         }
-        out.push(CcdDocument {
+        out.documents.push(CcdDocument {
             id,
             entry: e.name,
             header,
             bytes: e.bytes,
         });
     }
-    Ok((out, other))
+    out
 }
 
 /// `ccd-` and 24 hex digits of a SHA-256 over the patient and what makes
@@ -260,6 +274,26 @@ pub fn file_name(doc: &CcdDocument) -> String {
     };
     let safe = pk_cli_documents::fs_safe(&base);
     format!("{safe}.xml")
+}
+
+/// The file names `documents download --all` writes, one per document:
+/// [`file_name`], with the end of the id added to every name two documents
+/// share (a day's two notes of one title), so none overwrites another and
+/// each keeps its name on the next download.
+pub fn file_names(docs: &[CcdDocument]) -> Vec<String> {
+    let names: Vec<String> = docs.iter().map(file_name).collect();
+    names
+        .iter()
+        .zip(docs)
+        .map(|(n, d)| {
+            if names.iter().filter(|m| *m == n).count() < 2 {
+                return n.clone();
+            }
+            let stem = n.strip_suffix(".xml").unwrap_or(n);
+            let tail = &d.id[d.id.len().saturating_sub(8)..];
+            format!("{stem}_{tail}.xml")
+        })
+        .collect()
 }
 
 fn meta() -> Value {
@@ -413,8 +447,9 @@ mod tests {
     #[test]
     fn a_document_maps_to_a_reference_and_its_binary() {
         let zip = crate::zip::write(&[("ccd/one.xml", DOC.as_bytes()), ("CDA.xsl", b"<x/>")]);
-        let (docs, other) = documents(crate::zip::read(&zip).unwrap(), "1001").unwrap();
-        assert_eq!((docs.len(), other), (1, 1));
+        let a = documents(crate::zip::read(&zip).unwrap(), "1001");
+        assert_eq!((a.documents.len(), a.other), (1, 1));
+        let docs = a.documents;
         let d = &docs[0];
         let r = document_reference(d, Some("p-1"));
         assert_eq!(r["type"]["coding"][0]["code"], "34133-9");
@@ -442,7 +477,33 @@ mod tests {
     #[test]
     fn twin_documents_get_distinct_ids() {
         let zip = crate::zip::write(&[("a.xml", DOC.as_bytes()), ("b.xml", DOC.as_bytes())]);
-        let (docs, _) = documents(crate::zip::read(&zip).unwrap(), "1001").unwrap();
+        let docs = documents(crate::zip::read(&zip).unwrap(), "1001").documents;
         assert_ne!(docs[0].id, docs[1].id);
+        // Each gets its own file, the same on every download.
+        let names = file_names(&docs);
+        assert_ne!(names[0], names[1]);
+        assert_eq!(names, file_names(&docs));
+        assert!(
+            names[0].ends_with(&format!("_{}.xml", &docs[0].id[20..])),
+            "{names:?}"
+        );
+    }
+
+    #[test]
+    fn an_xml_file_that_is_not_a_document_leaves_the_others() {
+        let zip = crate::zip::write(&[
+            (
+                "METADATA.XML",
+                b"<SubmitObjectsRequest xmlns=\"urn:x\"/>".as_slice(),
+            ),
+            ("ccd/one.xml", DOC.as_bytes()),
+            (
+                "broken.xml",
+                b"<ClinicalDocument><title>x</code></ClinicalDocument>".as_slice(),
+            ),
+        ]);
+        let a = documents(crate::zip::read(&zip).unwrap(), "1001");
+        assert_eq!(a.documents.len(), 1);
+        assert_eq!(a.unreadable.len(), 2, "{:?}", a.unreadable);
     }
 }

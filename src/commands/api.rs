@@ -74,9 +74,10 @@ pub fn run(ctx: &Ctx, args: &ApiArgs) -> Result<(), CliError> {
         })?;
         let shown = match serde_json::from_str::<serde_json::Value>(text) {
             // Pretty only for display; `-o` keeps the server's own bytes.
-            Ok(v) if ctx.json() || std::io::IsTerminal::is_terminal(&std::io::stdout()) => {
-                serde_json::to_string_pretty(&v).unwrap_or_else(|_| text.to_string())
-            }
+            // Re-serializing turns escapes back into characters, so the
+            // result is redacted again.
+            Ok(v) if ctx.json() || std::io::IsTerminal::is_terminal(&std::io::stdout()) => redactor
+                .text(&serde_json::to_string_pretty(&v).unwrap_or_else(|_| text.to_string())),
             _ => text.to_string(),
         };
         let mut out = std::io::stdout().lock();

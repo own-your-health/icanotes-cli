@@ -9,12 +9,10 @@
 //! (401), a 429, or a window this run may not wait for, which end the
 //! stream incomplete.
 
-use std::collections::BTreeMap;
 use std::io::Write;
 
 use pk_cli_core::dates::Civil;
 use pk_cli_core::CliError;
-use pk_med_fhir::RawResource;
 use pk_med_records::stream::skip;
 use pk_med_records::{Finished, Header, PatientContext, RecordsWriter, Skip, Source};
 
@@ -137,6 +135,9 @@ pub struct Plan<'a> {
     pub today: Civil,
     pub pulled_at: String,
     pub version: &'a str,
+    /// The longest stream line: [`pk_med_records::MAX_LINE_BYTES`], or
+    /// less in a test.
+    pub max_line_bytes: usize,
 }
 
 impl Plan<'_> {
@@ -148,36 +149,6 @@ impl Plan<'_> {
             },
             None => Range::Complete,
         }
-    }
-}
-
-/// Gives a resource ICANotes sent without an `id` (its CareTeam, in the
-/// published samples) one: `icanotes-<type>-<n>`, numbered in the order the
-/// endpoint answered, so the same resource keeps its id across exports and
-/// a store keeps one record of it rather than one per pull.
-#[derive(Default)]
-pub struct Ids {
-    counts: BTreeMap<String, usize>,
-}
-
-impl Ids {
-    pub fn ensure(&mut self, r: RawResource) -> Result<RawResource, CliError> {
-        if !r.id.is_empty() {
-            return Ok(r);
-        }
-        let n = self.counts.entry(r.resource_type.clone()).or_insert(0);
-        *n += 1;
-        let id = format!("icanotes-{}-{n}", r.resource_type.to_ascii_lowercase());
-        let text = pk_med_fhir::minify(&r.raw);
-        let lead = format!(
-            "{{\"resourceType\":{}",
-            serde_json::to_string(&r.resource_type).expect("a string serializes")
-        );
-        let with_id = match text.strip_prefix(&lead) {
-            Some(rest) => format!("{lead},\"id\":\"{id}\"{rest}"),
-            None => format!("{{\"id\":\"{id}\",{}", &text[1..]),
-        };
-        RawResource::parse(&with_id)
     }
 }
 
@@ -211,7 +182,6 @@ pub fn run<W: Write>(
     let cred = plan.credential;
     let pair = cred.pair();
     let range = plan.range();
-    let mut ids = Ids::default();
 
     // The demographics: before the header, so a refused key writes nothing.
     let patients = api.resources(
@@ -237,9 +207,12 @@ pub fn run<W: Write>(
         header.since = Some(pk_cli_core::dates::fmt_iso(s));
         header.since_unbounded = vec!["Patient".into()];
     }
-    let mut w = RecordsWriter::start(out, &header)?;
-    for r in patients {
-        w.resource(&ids.ensure(r)?)?;
+    let mut w = RecordsWriter::start(out, &header)?.max_line_bytes(plan.max_line_bytes);
+    // A resource ICANotes sends without an id (its CareTeam, in the
+    // published samples) goes in as sent: the stream always writes one, and
+    // medrec names it by its content.
+    for r in &patients {
+        w.resource(r)?;
     }
 
     let finish = |w: RecordsWriter<W>, e: Option<CliError>| {
@@ -254,19 +227,8 @@ pub fn run<W: Write>(
         note(&format!("{} ({} of {})", s.endpoint, i + 2, REQUESTS));
         match api.resources(s.endpoint, &pair, &cred.patient_id, &range, &s.extra()) {
             Ok(rs) => {
-                for r in rs {
-                    let r = match ids.ensure(r) {
-                        Ok(r) => r,
-                        Err(e) => {
-                            w.skip(Skip::search(
-                                s.label(&range),
-                                skip::UPSTREAM,
-                                e.message().to_string(),
-                            ));
-                            continue;
-                        }
-                    };
-                    w.resource(&r)?;
+                for r in &rs {
+                    w.resource(r)?;
                 }
             }
             Err(e) if ends_export(&e) => {
@@ -285,32 +247,58 @@ pub fn run<W: Write>(
         }
     );
     match api.ccd(&pair, &cred.patient_id, &range) {
-        Ok((zip, count)) => match crate::zip::read(&zip)
-            .and_then(|entries| ccd::documents(entries, &cred.patient_id))
-        {
-            Ok((docs, _other)) => {
-                if let Some(c) = count {
-                    if c as usize != docs.len() {
+        Ok((zip, count)) => {
+            match crate::zip::read(&zip).map(|entries| ccd::documents(entries, &cred.patient_id)) {
+                Ok(archive) => {
+                    for why in &archive.unreadable {
                         w.skip(Skip::search(
                             ccd_label.clone(),
-                            skip::NO_FILE,
-                            format!(
-                                "ICANotes said the archive holds {c} documents and it holds {}",
-                                docs.len()
-                            ),
+                            skip::UPSTREAM,
+                            format!("a file of the archive is not a C-CDA document: {why}"),
                         ));
                     }
+                    let docs = archive.documents;
+                    if let Some(c) = count {
+                        if c as usize != docs.len() {
+                            w.skip(Skip::search(
+                                ccd_label.clone(),
+                                skip::NO_FILE,
+                                format!(
+                                    "ICANotes said the archive holds {c} documents and it holds {}",
+                                    docs.len()
+                                ),
+                            ));
+                        }
+                    }
+                    for d in &docs {
+                        let binary = ccd::raw(&ccd::binary(d))?;
+                        if binary.raw.len()
+                            > plan.max_line_bytes.min(pk_med_records::MAX_LINE_BYTES)
+                        {
+                            // Its DocumentReference would name a Binary the
+                            // stream cannot carry; `documents download` can.
+                            w.skip(Skip::resource(
+                            "DocumentReference",
+                            &d.id,
+                            skip::TOO_LARGE,
+                            format!(
+                                "the document is {} bytes, over what one stream line carries as base64; `icanotes documents download {}` saves it",
+                                d.bytes.len(),
+                                d.id
+                            ),
+                        ));
+                            continue;
+                        }
+                        w.resource(&ccd::raw(&ccd::document_reference(
+                            d,
+                            patient_ref.as_deref(),
+                        ))?)?;
+                        w.resource(&binary)?;
+                    }
                 }
-                for d in &docs {
-                    w.resource(&ccd::raw(&ccd::document_reference(
-                        d,
-                        patient_ref.as_deref(),
-                    ))?)?;
-                    w.resource(&ccd::raw(&ccd::binary(d))?)?;
-                }
+                Err(e) => w.skip(skip_for(&ccd_label, &e)),
             }
-            Err(e) => w.skip(skip_for(&ccd_label, &e)),
-        },
+        }
         Err(e) if ends_export(&e) => return finish(w, Some(e)),
         Err(e) => w.skip(skip_for(&ccd_label, &e)),
     }
@@ -320,30 +308,6 @@ pub fn run<W: Write>(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_resource_without_an_id_gets_a_stable_one() {
-        let mut ids = Ids::default();
-        let a = RawResource::parse(r#"{"resourceType":"CareTeam","status":"active","x":1.50}"#)
-            .unwrap();
-        let b = RawResource::parse("{\n \"status\": \"active\", \"resourceType\": \"CareTeam\"\n}")
-            .unwrap();
-        let a = ids.ensure(a).unwrap();
-        let b = ids.ensure(b).unwrap();
-        assert_eq!(a.id, "icanotes-careteam-1");
-        assert!(
-            a.raw
-                .starts_with(r#"{"resourceType":"CareTeam","id":"icanotes-careteam-1","#),
-            "{}",
-            a.raw
-        );
-        assert!(a.raw.contains("1.50"));
-        assert_eq!(b.id, "icanotes-careteam-2");
-        let kept = ids
-            .ensure(RawResource::parse(r#"{"resourceType":"Goal","id":"g1"}"#).unwrap())
-            .unwrap();
-        assert_eq!(kept.raw, r#"{"resourceType":"Goal","id":"g1"}"#);
-    }
 
     #[test]
     fn labels_carry_no_patient_or_key() {

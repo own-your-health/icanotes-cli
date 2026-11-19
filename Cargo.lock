@@ -1084,6 +1084,7 @@ dependencies = [
  "clap",
  "clap_complete",
  "flate2",
+ "memchr",
  "pk-cli-auth",
  "pk-cli-browser",
  "pk-cli-config",
