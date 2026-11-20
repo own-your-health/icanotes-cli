@@ -65,6 +65,11 @@ These are behavioral-health records: the most sensitive a household has.
   the debug port in that profile's `DevToolsActivePort`; it checks the fields
   are non-empty before submitting, and the owner clicks any consent, terms or
   code prompt.
+- `KEY_EXPRESSION` answers `{"stopped": "portal-disabled"}` when the sign-in
+  says the practice turned the portal off, and the confirm hook ends the wait
+  with `Confirm::Fail` (exit 3). The capture reads only https pages on the
+  default port, so no local page can stand in for the portal: the
+  expression's cases run in Chromium through `make check-key-expression`.
 - Tests and `make verify` never read the real Keychain:
   `ICANOTES_KEYCHAIN_SERVICE` names an empty service for the surface tests
   and `smoke`, with the vault beside their scratch config; the in-process
