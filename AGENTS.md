@@ -12,7 +12,7 @@ and the `pk-med-*` crates from
 
 | File | Owns |
 |---|---|
-| `src/main.rs` | dispatch, `info`, exit codes, `--profile` refused where it means nothing |
+| `src/main.rs` | dispatch, `info` (with `setup`), exit codes, `--profile` refused where it means nothing |
 | `src/cli.rs` | the clap tree |
 | `src/commands/*.rs` | one module per command group; `Ctx` in `mod.rs`: the config, `--profile`, the vault (or the test service's), the transport, the browser window, `rate.json` |
 | `src/config.rs` | the config (`api_base`, `portal_url`), the profiles and each one's grants (`ProfileSettings`, `Grant`), the organization, which hosts are allowed (checked on every load) |
@@ -26,6 +26,7 @@ and the `pk-med-*` crates from
 | `src/login.rs` | `auth login --browser`: the expression that reads the key off the page (`make check-key-expression`), remembered verdicts |
 | `tests/support/mock.rs` | the mock ICANotes API on 127.0.0.1, shared by `tests/e2e.rs` and `examples/mock_icanotes.rs` (`make mock`) |
 | `docs/api.md` | ICANotes' API, its sources and its traps; read before changing the client, export or login |
+| `docs/registration.md` | setup for anyone: the practice's portal account, generating the key, storing it, what each refusal means |
 
 ## Medical data
 
@@ -65,6 +66,12 @@ These are behavioral-health records: the most sensitive a household has.
   the debug port in that profile's `DevToolsActivePort`; it checks the fields
   are non-empty before submitting, and the owner clicks any consent, terms or
   code prompt.
+- Setup is explained in `docs/registration.md`, at `commands::SETUP_DOC`.
+  `info` reports `setup` (the doc; `configured`, true when at least one
+  profile records a key; `logins`, each profile's `keys`, or its `error`
+  when its settings do not read) from the config file alone, never the
+  vault, so it runs anywhere and never prompts. `auth status` carries `setup_doc`, and the missing-key error names
+  the doc with the command to run.
 - `KEY_EXPRESSION` answers `{"stopped": "portal-disabled"}` when the sign-in
   says the practice turned the portal off, and the confirm hook ends the wait
   with `Confirm::Fail` (exit 3). The capture reads only https pages on the
@@ -100,7 +107,9 @@ These are behavioral-health records: the most sensitive a household has.
 - `tests/cli_surface.rs`: help, exit codes, JSON errors, `info`,
   completions, `orgs`, `config`, `profiles`, `--profile` required and
   refused, a profile with nothing stored, malformed pairs never echoed, a
-  hand-edited `api_base` refused.
+  hand-edited `api_base` refused, the setup doc named by `info`, `auth
+  status` and the missing-key error, and `info` with a config that does not
+  read.
 - `tests/e2e.rs`: in process against the mock, as profile `adult1`: browser
   login (one check per pair shown), a refused pair never stored,
   `set-credential`, a full export (counts, ids, the Binary's bytes, 13 keyed

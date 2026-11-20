@@ -139,8 +139,9 @@ pub fn portal_disabled(profile: &str) -> CliError {
     )
     .with_remedy(format!(
         "ask the practice to turn the patient portal back on for this patient, then run \
-         `{} auth login --browser --profile {profile}` again",
-        crate::commands::BIN
+         `{} auth login --browser --profile {profile}` again ({})",
+        crate::commands::BIN,
+        crate::commands::SETUP_DOC
     ))
 }
 

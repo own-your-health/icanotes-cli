@@ -37,7 +37,7 @@ fn run(cli: &Cli) -> Result<(), CliError> {
             return Ok(());
         }
         Command::Info => {
-            info();
+            info(cli.config.clone());
             return Ok(());
         }
         Command::SelfUpdate(args) => {
@@ -65,7 +65,7 @@ fn run(cli: &Cli) -> Result<(), CliError> {
     }
 }
 
-fn info() {
+fn info(config: Option<std::path::PathBuf>) {
     let mut info = CliInfo::new(
         BIN,
         env!("CARGO_PKG_VERSION"),
@@ -85,5 +85,9 @@ fn info() {
     // Login commands take --profile, so a records store passes one.
     info.capabilities
         .push(pk_med_records::LOGIN_PROFILES.to_string());
-    output::json(&serde_json::to_value(&info).expect("CliInfo serializes to JSON"));
+    let mut v = serde_json::to_value(&info).expect("CliInfo serializes to JSON");
+    // Whether a key is set up, and where setup is explained; from the
+    // config file only, so `info` still runs anywhere and never prompts.
+    v["setup"] = commands::setup_state(config);
+    output::json(&v);
 }

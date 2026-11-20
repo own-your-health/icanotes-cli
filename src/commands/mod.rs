@@ -32,6 +32,42 @@ pub const BIN: &str = "icanotes";
 pub const REPO: &str = "piekstra/icanotes-cli";
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// What a patient and their practice do before icanotes can read anything:
+/// named by `info`, `auth status` and every missing-key error.
+pub const SETUP_DOC: &str =
+    "https://github.com/piekstra/icanotes-cli/blob/main/docs/registration.md";
+
+/// `info`'s `setup`: the doc, and how many keys each profile records. It
+/// reads the config file alone, never the vault or the Keychain, so `info`
+/// stays free of prompts. `configured` is true when at least one profile
+/// records a key. A config, or a profile's settings, that does not read is
+/// reported as `error` (in place of `keys` for a profile), not fatal.
+pub fn setup_state(config: Option<PathBuf>) -> serde_json::Value {
+    let mut v = serde_json::json!({ "doc": SETUP_DOC });
+    match ConfigStore::new(BIN).with_override(config).load::<Config>() {
+        Ok(c) => {
+            let logins: Vec<serde_json::Value> = c
+                .profiles
+                .names()
+                .map(|p| match c.profiles.settings::<ProfileSettings>(p) {
+                    Ok(s) => serde_json::json!({ "profile": p.as_str(), "keys": s.grants.len() }),
+                    Err(e) => serde_json::json!({ "profile": p.as_str(), "error": e.message() }),
+                })
+                .collect();
+            v["configured"] = logins
+                .iter()
+                .any(|l| l["keys"].as_u64().is_some_and(|k| k > 0))
+                .into();
+            v["logins"] = logins.into();
+        }
+        Err(e) => {
+            v["configured"] = false.into();
+            v["error"] = e.message().into();
+        }
+    }
+    v
+}
+
 /// Names the keychain service a run uses instead of `piekstra.icanotes`.
 /// For the test suite and for dogfooding: a service that holds nothing reads
 /// as signed out without a keychain prompt. With it, the vault lives beside

@@ -133,7 +133,8 @@ impl ProfileSettings {
                 ))
                 .because(pk_cli_core::Reason::NoCredential)
                 .with_remedy(format!(
-                    "run `{bin} auth login --browser --profile {profile}`, or store a key with `{bin} auth set-credential --profile {profile}`"
+                    "run `{bin} auth login --browser --profile {profile}`, or store a key with `{bin} auth set-credential --profile {profile}`; {} explains what the practice and the patient do first",
+                    crate::commands::SETUP_DOC
                 ))),
                 _ => Err(CliError::Usage(format!(
                     "profile {profile} holds more than one patient; say which with --patient"
