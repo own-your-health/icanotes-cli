@@ -67,9 +67,10 @@ These are behavioral-health records: the most sensitive a household has.
   are non-empty before submitting, and the owner clicks any consent, terms or
   code prompt.
 - Setup is explained in `docs/registration.md`, at `commands::SETUP_DOC`.
-  `info` reports `setup` (the doc, `configured`, keys per profile) from the
-  config file alone, never the vault, so it runs anywhere and never
-  prompts. `auth status` carries `setup_doc`, and the missing-key error names
+  `info` reports `setup` (the doc; `configured`, true when at least one
+  profile records a key; `logins`, each profile's `keys`, or its `error`
+  when its settings do not read) from the config file alone, never the
+  vault, so it runs anywhere and never prompts. `auth status` carries `setup_doc`, and the missing-key error names
   the doc with the command to run.
 - `KEY_EXPRESSION` answers `{"stopped": "portal-disabled"}` when the sign-in
   says the practice turned the portal off, and the confirm hook ends the wait

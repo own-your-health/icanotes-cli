@@ -78,8 +78,10 @@ These steps need a person:
   stores or reads a key ("Always Allow"; each new build asks once).
 
 The key lasts until you delete it on the portal's FHIR API Access page: it
-does not expire, and generating another leaves it valid. So the portal
-sign-in is needed only once per key; exports never sign in.
+does not expire. ICANotes' documentation says you can generate as many as
+you need, so an earlier key should stay valid when you generate another (not
+yet confirmed on a signed-in account). The portal sign-in is needed only
+once per key; exports never sign in.
 `icanotes auth logout` and `icanotes profiles remove` forget only icanotes'
 copy.
 

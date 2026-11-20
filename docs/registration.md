@@ -102,6 +102,11 @@ icanotes auth status --profile me --check   # stored, and accepted by ICANotes
 icanotes info                               # setup.configured, keys per profile
 ```
 
+`setup.configured` in `info` is true when at least one profile records a
+key; `setup.logins` gives each profile's count, or an `error` in its place
+when the profile's settings do not read. `info` reads only the config file,
+so `auth status --check` is what confirms ICANotes accepts a key.
+
 Then export, or let medrec run the export:
 
 ```sh
@@ -113,7 +118,9 @@ medrec --profile <FOLDER> import --from icanotes --from-profile me --patient me
 
 - A pair does not expire. ICANotes' documentation: "userTokens do not get
   deleted unless you delete them from the Patient Portal page yourself."
-- Generating another pair leaves earlier ones valid.
+- ICANotes' documentation says you can generate as many pairs as you need,
+  so earlier pairs should stay valid when you generate another. This is not
+  yet confirmed on a signed-in account.
 - To revoke a pair, delete it on the FHIR API Access page.
   `icanotes auth logout` and `icanotes profiles remove` forget only
   icanotes' copy.

@@ -183,6 +183,24 @@ fn info_runs_with_a_config_that_does_not_read() {
     let v = stdout_json(icanotes(&home).arg("info"));
     assert_eq!(v["setup"]["configured"], false);
     assert!(v["setup"]["error"].is_string(), "{v}");
+
+    // A profile whose settings do not read carries the reason, not a key
+    // count, and the others still count.
+    std::fs::write(
+        dir.join("config.json"),
+        r#"{"profiles": {"bad": {"grants": 5}, "ok": {"grants": [{"id": "1", "organization": "icanotes", "stored_at": "1900-01-01T00:00:00Z", "method": "stdin"}]}}}"#,
+    )
+    .unwrap();
+    let v = stdout_json(icanotes(&home).arg("info"));
+    let logins = v["setup"]["logins"].as_array().unwrap();
+    let bad = logins.iter().find(|l| l["profile"] == "bad").unwrap();
+    assert!(
+        bad["error"].is_string() && bad.get("keys").is_none(),
+        "{bad}"
+    );
+    let ok = logins.iter().find(|l| l["profile"] == "ok").unwrap();
+    assert_eq!(ok["keys"], 1);
+    assert_eq!(v["setup"]["configured"], true);
 }
 
 #[test]

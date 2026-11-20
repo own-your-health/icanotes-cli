@@ -39,8 +39,9 @@ pub const SETUP_DOC: &str =
 
 /// `info`'s `setup`: the doc, and how many keys each profile records. It
 /// reads the config file alone, never the vault or the Keychain, so `info`
-/// stays free of prompts; a config that does not read is reported, not
-/// fatal.
+/// stays free of prompts. `configured` is true when at least one profile
+/// records a key. A config, or a profile's settings, that does not read is
+/// reported as `error` (in place of `keys` for a profile), not fatal.
 pub fn setup_state(config: Option<PathBuf>) -> serde_json::Value {
     let mut v = serde_json::json!({ "doc": SETUP_DOC });
     match ConfigStore::new(BIN).with_override(config).load::<Config>() {
@@ -48,13 +49,9 @@ pub fn setup_state(config: Option<PathBuf>) -> serde_json::Value {
             let logins: Vec<serde_json::Value> = c
                 .profiles
                 .names()
-                .map(|p| {
-                    let keys = c
-                        .profiles
-                        .settings::<ProfileSettings>(p)
-                        .map(|s| s.grants.len())
-                        .ok();
-                    serde_json::json!({ "profile": p.as_str(), "keys": keys })
+                .map(|p| match c.profiles.settings::<ProfileSettings>(p) {
+                    Ok(s) => serde_json::json!({ "profile": p.as_str(), "keys": s.grants.len() }),
+                    Err(e) => serde_json::json!({ "profile": p.as_str(), "error": e.message() }),
                 })
                 .collect();
             v["configured"] = logins
