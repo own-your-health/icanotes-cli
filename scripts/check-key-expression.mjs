@@ -35,6 +35,8 @@ const cases = [
   ['nothing generated yet', null,
     `<h2>FHIR API Access</h2><span id="lblUserKey">UserKey</span><span id="lblUserSecret">UserSecret</span><button id="btnGenerate">Generate New Credentials</button>`],
   ['one value for both', null, `<p>User Key: ${K}</p><p>User Secret: ${K}</p>`],
+  ['the portal turned off at sign-in', JSON.stringify({ stopped: 'portal-disabled' }),
+    `<h1>Patient Portal Login</h1><div class="alert alert-warning">Use of the Patient Portal has been disabled. Please contact your provider with questions.</div><a class="btn btn-primary" href="/">Return to Login</a>`],
 ];
 
 const browser = await chromium.launch({ headless: true });

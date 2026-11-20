@@ -30,8 +30,17 @@ use crate::credential::KeyPair;
 /// only of the page's own words ("UserSecret", "Generate", "Copy key"), so
 /// a label the page names `lblUserSecret` is passed over for the value
 /// beside it.
+///
+/// When the practice has turned the portal off for the login, the sign-in
+/// answers "Use of the Patient Portal has been disabled" instead of
+/// signing in. The expression then answers `{"stopped": "portal-disabled"}`,
+/// so the wait ends at once rather than at its timeout.
 pub const KEY_EXPRESSION: &str = r#"(() => {
   const norm = (s) => (s || '').replace(/\s+/g, ' ').trim();
+  const shown = norm(document.body ? document.body.innerText : '');
+  if (/use of the patient portal has been disabled/i.test(shown)) {
+    return JSON.stringify({ stopped: 'portal-disabled' });
+  }
   const UI = /^(?:user|api|client|patient|portal|fhir|access|new|your|generate|generated|regenerate|copy|copied|show|hide|reveal|delete|remove|credentials?|keys?|secrets?|tokens?|value|here|[\s:_\-.])+$/i;
   const NOT_VALUES = 'button, a, option, select, label, th, dt, [role=button], [role=link]';
   const valueOf = (el) => {
@@ -86,28 +95,66 @@ pub struct WindowRequest<'a> {
 pub type Window = Box<dyn Fn(&WindowRequest) -> Result<KeyPair, CliError>>;
 
 #[derive(Deserialize)]
-struct Shown {
-    key: String,
-    secret: String,
+#[serde(untagged)]
+enum Shown {
+    Pair { key: String, secret: String },
+    Stopped { stopped: String },
+}
+
+/// What the page answered.
+#[derive(Debug)]
+pub enum Answer {
+    /// The key and secret the FHIR API Access page shows.
+    Pair(KeyPair),
+    /// The sign-in said the practice has turned the portal off.
+    PortalDisabled,
+}
+
+/// The page's answer: a key and secret, or a sign-in no later poll changes.
+pub fn read_answer(text: &str) -> Result<Answer, CliError> {
+    let unread =
+        || CliError::Upstream("the FHIR API Access page's key and secret did not read".into());
+    match serde_json::from_str(text).map_err(|_| unread())? {
+        Shown::Pair { key, secret } => KeyPair::new(&key, &secret).map(Answer::Pair),
+        Shown::Stopped { stopped } if stopped == "portal-disabled" => Ok(Answer::PortalDisabled),
+        Shown::Stopped { .. } => Err(unread()),
+    }
 }
 
 /// The page's answer as a key and secret.
 pub fn read_shown(text: &str) -> Result<KeyPair, CliError> {
-    let shown: Shown = serde_json::from_str(text).map_err(|_| {
-        CliError::Upstream("the FHIR API Access page's key and secret did not read".into())
-    })?;
-    KeyPair::new(&shown.key, &shown.secret)
+    match read_answer(text)? {
+        Answer::Pair(pair) => Ok(pair),
+        Answer::PortalDisabled => Err(portal_disabled("<NAME>")),
+    }
+}
+
+/// The error for a portal the practice has turned off: signing in again
+/// cannot help, so it ends the wait.
+pub fn portal_disabled(profile: &str) -> CliError {
+    CliError::Auth(
+        "the patient portal answered \"Use of the Patient Portal has been disabled\" at sign-in, \
+         so no key can be generated"
+            .into(),
+    )
+    .with_remedy(format!(
+        "ask the practice to turn the patient portal back on for this patient, then run \
+         `{} auth login --browser --profile {profile}` again",
+        crate::commands::BIN
+    ))
 }
 
 /// Chrome, through pk-cli-browser.
 pub fn chrome_window() -> Window {
     Box::new(|req: &WindowRequest| {
         let confirm = req.confirm.clone();
+        let profile = req.profile.as_str().to_string();
         let capture = Capture::new("ICANotes patient portal", HostRule::exact(req.host)?)
             .expression(KEY_EXPRESSION)
             .confirm(
-                move |c: &Captured| match c.value().map(|v| read_shown(v.expose())) {
-                    Some(Ok(pair)) => confirm(&pair),
+                move |c: &Captured| match c.value().map(|v| read_answer(v.expose())) {
+                    Some(Ok(Answer::Pair(pair))) => confirm(&pair),
+                    Some(Ok(Answer::PortalDisabled)) => Confirm::Fail(portal_disabled(&profile)),
                     Some(Err(_)) => {
                         Confirm::NotYet("the page's key and secret did not read".into())
                     }
@@ -187,6 +234,14 @@ mod tests {
         let p = read_shown(r#"{"key":"key-one","secret":"secret-one"}"#).unwrap();
         assert_eq!(p.user_key, "key-one");
         assert!(read_shown("null").is_err());
+        assert!(matches!(
+            read_answer(r#"{"stopped":"portal-disabled"}"#),
+            Ok(Answer::PortalDisabled)
+        ));
+        assert!(read_answer(r#"{"stopped":"something-else"}"#).is_err());
+        let e = portal_disabled("adult1");
+        assert_eq!(e.exit_code(), 3, "{e}");
+        assert!(e.remedy().unwrap().contains("--profile adult1"), "{e}");
         assert!(read_shown(r#"{"key":"has space","secret":"x"}"#).is_err());
     }
 

@@ -1,7 +1,7 @@
 [package]
 name = "icanotes-cli"
 description = "Pull your own records from a practice on ICANotes (patientonlineportal.com) through ICANotes' patient API key. Unofficial; not affiliated with or endorsed by ICANotes."
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 # pk-cli-auth's refresh lock (File::lock) needs 1.89.
 rust-version = "1.89"

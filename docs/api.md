@@ -27,6 +27,11 @@ no consent screen: the key and secret are the patient's.
   (`/idp/account/signin`, fields `UserName` and `Password`, a "Remember me?"
   checkbox). icanotes never fills it; the patient does, or a session working
   for the patient fills it from 1Password over stdin.
+- A practice can turn the portal off for a login. The sign-in then stays on
+  `/idp/account/signin` and shows "Use of the Patient Portal has been
+  disabled. Please contact your provider with questions." with a Return to
+  Login button, in place of an invalid-password message. No key can be
+  generated until the practice turns it back on.
 - The docs place the credentials on the portal: log in, then request them.
   The page is My History, FHIR API Access, Generate New Credentials.
 - `r2test.icanotes.com` is the docs' test host. It serves the docs' sample
@@ -224,6 +229,10 @@ first real `auth login --browser`, as shapes and counts only:
 - **No id on CareTeam.** An id assigned by answer order would give one
   team's id to another when the order changes, and a store would overwrite
   one with the other. icanotes leaves it out; the store names it by content.
+- **A turned-off portal looks like a sign-in still to finish.** The page is
+  the sign-in page, so a wait for the key would run to its timeout.
+  `auth login` reads the notice and ends at once with exit 3, naming the
+  practice as the remedy.
 - **An answer can echo the query.** An error body or a passthrough answer
   may repeat the key and secret in any encoding; `api` output passes
   through the redactor, pretty-printed output a second time.

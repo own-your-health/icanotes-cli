@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.1.1 (2026-11-19)
+
+- `auth login --browser` ends at once with exit 3 when the portal's sign-in
+  says "Use of the Patient Portal has been disabled", instead of waiting out
+  `--timeout` on a sign-in that cannot finish. The remedy is to ask the
+  practice to turn the portal back on.
+
 ## v0.1.0 (2026-11-19)
 
 First release.
