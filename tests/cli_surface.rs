@@ -123,6 +123,66 @@ fn info_is_cli_info() {
         .unwrap()
         .contains(&json!("login-profiles")));
     assert!(v.to_string().contains("piekstra/icanotes-cli"));
+    // With nothing configured, info says so and names the setup doc.
+    assert!(v["setup"]["doc"]
+        .as_str()
+        .unwrap()
+        .ends_with("/docs/registration.md"));
+    assert_eq!(v["setup"]["configured"], false);
+    assert_eq!(v["setup"]["logins"], json!([]));
+}
+
+/// A newcomer is told where setup is explained by every surface that finds
+/// no key: `info`, `auth status` and the error a command without one ends
+/// in. None of them reads the Keychain.
+#[test]
+fn a_profile_with_no_key_points_at_the_setup_doc() {
+    let home = tmp();
+    icanotes(&home)
+        .args(["profiles", "add", "me"])
+        .assert()
+        .success();
+    let v = stdout_json(icanotes(&home).arg("info"));
+    assert_eq!(v["setup"]["configured"], false);
+    assert_eq!(
+        v["setup"]["logins"],
+        json!([{ "profile": "me", "keys": 0 }])
+    );
+
+    let s = stdout_json(icanotes(&home).args(["auth", "status", "--profile", "me", "--json"]));
+    assert_eq!(s["authenticated"], false);
+    assert_eq!(s["setup_doc"], v["setup"]["doc"]);
+    icanotes(&home)
+        .args(["auth", "status", "--profile", "me"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("Setup:").and(predicate::str::contains("registration.md")),
+        );
+
+    let out = icanotes(&home)
+        .args(["documents", "list", "--profile", "me", "--json"])
+        .assert()
+        .code(3);
+    let e = json_of(&out.get_output().stdout);
+    let message = e["error"]["message"].as_str().unwrap();
+    assert!(
+        message.contains("auth login --browser --profile me"),
+        "{message}"
+    );
+    assert!(message.contains("docs/registration.md"), "{message}");
+}
+
+/// A config that does not read leaves `info` working, with the reason.
+#[test]
+fn info_runs_with_a_config_that_does_not_read() {
+    let home = tmp();
+    let dir = home.join("config").join("icanotes");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("config.json"), "{ not json").unwrap();
+    let v = stdout_json(icanotes(&home).arg("info"));
+    assert_eq!(v["setup"]["configured"], false);
+    assert!(v["setup"]["error"].is_string(), "{v}");
 }
 
 #[test]

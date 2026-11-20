@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.1.2 (2026-11-20)
+
+- `docs/registration.md`: setup for anyone, from the practice's portal
+  account to a stored key, with what each refusal means.
+- `info` reports `setup`: the doc, whether any profile holds a key
+  (`configured`) and how many keys each profile records. It reads the config
+  file only, so it still runs anywhere and never prompts.
+- `auth status` carries `setup_doc` and prints a Setup line when the profile
+  holds no key; the missing-key error and the disabled-portal error name the
+  doc.
+- README: who it is for and a quick start from `profiles add` to `medrec
+  import`, with the steps that need a person and how long a key lasts.
+
 ## v0.1.1 (2026-11-19)
 
 - `auth login --browser` ends at once with exit 3 when the portal's sign-in

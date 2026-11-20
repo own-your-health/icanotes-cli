@@ -17,6 +17,16 @@ It reads, and never changes anything at ICANotes:
 - the C-CDA documents the portal offers, as a DocumentReference and a Binary
   each.
 
+## Who it is for
+
+Any patient of a practice that keeps its records in ICANotes and gives its
+patients the ICANotes patient portal. You need a portal account from the
+practice; the practice creates it, as the portal has no sign-up of its own.
+There is no app to register: you generate a key and secret on the portal, and
+icanotes stores them. [`docs/registration.md`](docs/registration.md) walks
+through it, including what to do when the portal says "Use of the Patient
+Portal has been disabled".
+
 ## Status
 
 v0.1. Built and tested against ICANotes' published API documentation and a
@@ -36,49 +46,68 @@ From source: `make install` (Rust 1.89 or later).
 
 `icanotes self-update` replaces the binary with the latest release.
 
-## Setup
+## Quick start
 
-A profile is one patient-portal account; name it for the person
-(`adult1`). Every command that uses a key needs `--profile <NAME>` (or
-`ICANOTES_PROFILE`); there is no default.
+A profile is one portal login; name it for the person (`me` below). Every
+command that uses a key needs `--profile <NAME>` (or `ICANOTES_PROFILE`);
+there is no default.
 
 ```sh
-icanotes profiles add adult1
-icanotes auth login --browser --profile adult1 --label adult1
+icanotes profiles add me
+icanotes auth login --browser --profile me --label me
+icanotes auth status --profile me --check
+icanotes records export --profile me --ndjson > me.ndjson
+medrec --profile <FOLDER> import --from icanotes --from-profile me --patient me
 ```
 
-`auth login --browser` opens the portal in Chrome, in that profile's own
-browser profile. Sign in, open My History, then FHIR API Access, and choose
-Generate New Credentials. icanotes reads the key and secret off the page,
-checks them with ICANotes, stores them in its vault, and closes the window.
-Neither is printed.
+1. `profiles add` names the login.
+2. `auth login --browser` opens the portal in Chrome, in that profile's own
+   browser profile. Sign in, open My History, then FHIR API Access, and
+   choose Generate New Credentials. icanotes reads the key and secret off the
+   page, checks them with ICANotes, stores them in its vault, and closes the
+   window. Neither is printed.
+3. `auth status --check` asks ICANotes whether the stored key works.
+4. `records export` writes everything as a `records-stream/v1` stream.
+5. [medrec](https://github.com/piekstra/medrec-cli) runs that export itself
+   and files the records.
+
+These steps need a person:
+- the portal password, typed or filled by a password manager;
+- any code, terms or consent prompt the portal shows;
+- on macOS, the Keychain prompt the first time a newly installed icanotes
+  stores or reads a key ("Always Allow"; each new build asks once).
+
+The key lasts until you delete it on the portal's FHIR API Access page: it
+does not expire, and generating another leaves it valid. So the portal
+sign-in is needed only once per key; exports never sign in.
+`icanotes auth logout` and `icanotes profiles remove` forget only icanotes'
+copy.
 
 A key you generated yourself goes in from stdin instead:
 
 ```sh
-pbpaste | icanotes auth set-credential --profile adult1 --stdin   # <key>:<secret>
+pbpaste | icanotes auth set-credential --profile me --stdin   # <key>:<secret>
 ```
 
-The key stays valid at ICANotes until you delete it on the FHIR API Access
-page; `icanotes auth logout` and `icanotes profiles remove` only forget
-icanotes' copy.
+`icanotes info` says whether any profile holds a key (`setup.configured`) and
+where setup is explained; `icanotes auth status --profile <NAME>` says it for
+one profile. A command that finds no key exits 3 and names the command to run
+and `docs/registration.md`.
 
 ## Use
 
 ```sh
-# medrec runs `icanotes records export --ndjson` itself:
-medrec import --from icanotes --from-profile adult1 --patient <ID> --profile <FOLDER>
-icanotes patients list --profile adult1          # the <ID>
-icanotes records export --profile adult1 --ndjson --since 2026-01-01
-icanotes documents list --profile adult1
-icanotes documents download --profile adult1 --all -o ~/Documents/ccd
-icanotes auth status --profile adult1 --check
-icanotes api GET 'Goal?req_type=Complete' --profile adult1
+icanotes patients list --profile me              # who the profile holds keys for
+icanotes records export --profile me --ndjson --since 2026-01-01
+icanotes documents list --profile me
+icanotes documents download --profile me --all -o ~/Documents/ccd
+icanotes api GET 'Goal?req_type=Complete' --profile me
 ```
 
 ICANotes allows 10 requests per window (about ten minutes) and locks a client
 out for 15 minutes after exceeding it. An export makes 13, so it waits once,
-saying so on stderr; `--max-wait <MIN>` bounds the wait.
+saying so on stderr; `--max-wait <MIN>` bounds the wait. Every run shares one
+window.
 
 ## Commands
 
@@ -95,7 +124,7 @@ saying so on stderr; `--max-wait <MIN>` bounds the wait.
 | `documents list\|download` | the C-CDA documents (`documents/v1`) |
 | `api GET <Endpoint>?<query>` | one request, the key added and redacted from the output |
 | `config path\|show\|set\|unset` | `api_base`, `portal_url` |
-| `self-update`, `completions`, `info` | the family's standard commands |
+| `self-update`, `completions`, `info` | the family's standard commands; `info` also reports `setup` |
 
 Every command takes `--json` (one schema-tagged document on stdout), except
 `records export --ndjson`, whose stream is the output. Exit codes: 0 ok, 2

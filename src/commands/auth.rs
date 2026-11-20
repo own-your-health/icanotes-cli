@@ -266,6 +266,7 @@ pub fn status_of(ctx: &Ctx, check: bool) -> Result<(AuthStatus, Value), CliError
     let mut v = status.to_json();
     v["profile"] = profile.as_str().into();
     v["patients"] = Value::Array(rows);
+    v["setup_doc"] = super::SETUP_DOC.into();
     Ok((status, v))
 }
 
@@ -281,6 +282,7 @@ fn status(ctx: &Ctx, args: &StatusArgs) -> Result<(), CliError> {
     let rows = v["patients"].as_array().cloned().unwrap_or_default();
     if rows.is_empty() {
         println!("Patients:      none (`{BIN} auth login --browser --profile {profile}`)");
+        println!("Setup:         {}", super::SETUP_DOC);
     }
     for r in rows {
         let who = match r["label"].as_str() {
