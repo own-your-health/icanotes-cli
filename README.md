@@ -4,7 +4,7 @@
 through the patient API key the practice's patient portal
 (patientonlineportal.com) lets you generate. It writes them as a
 `records-stream/v1` stream, the format
-[medrec](https://github.com/piekstra/medrec-cli) imports.
+[medrec](https://github.com/own-your-health/medrec-cli) imports.
 
 Unofficial; not affiliated with or endorsed by ICANotes.
 
@@ -38,7 +38,7 @@ not been confirmed on a signed-in account.
 From a release (macOS arm64 and x86_64, Linux x86_64):
 
 ```sh
-gh release download --repo piekstra/icanotes-cli --pattern "icanotes-$(rustc -vV | sed -n 's/host: //p').tar.gz"
+gh release download --repo own-your-health/icanotes-cli --pattern "icanotes-$(rustc -vV | sed -n 's/host: //p').tar.gz"
 tar xzf icanotes-*.tar.gz && mv icanotes ~/.local/bin/
 ```
 
@@ -68,7 +68,7 @@ medrec --profile <FOLDER> import --from icanotes --from-profile me --patient me
    window. Neither is printed.
 3. `auth status --check` asks ICANotes whether the stored key works.
 4. `records export` writes everything as a `records-stream/v1` stream.
-5. [medrec](https://github.com/piekstra/medrec-cli) runs that export itself
+5. [medrec](https://github.com/own-your-health/medrec-cli) runs that export itself
    and files the records.
 
 These steps need a person:

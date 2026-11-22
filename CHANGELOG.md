@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.1.3 (2026-11-22)
+
+- The repository moved to own-your-health/icanotes-cli. `self-update`,
+  `info` and the setup-doc link name the new owner; GitHub redirects the old
+  URLs. The FHIR tag system
+  (`https://github.com/piekstra/icanotes-cli/fhir/tag`) and the Keychain
+  service (`piekstra.icanotes`) are identifiers in stored records and keys,
+  and stay as they were.
+- medical-common comes from own-your-health/medical-common, at the same tag.
+
 ## v0.1.2 (2026-11-20)
 
 - `docs/registration.md`: setup for anyone, from the practice's portal

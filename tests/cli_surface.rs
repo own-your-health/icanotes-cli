@@ -122,7 +122,7 @@ fn info_is_cli_info() {
         .as_array()
         .unwrap()
         .contains(&json!("login-profiles")));
-    assert!(v.to_string().contains("piekstra/icanotes-cli"));
+    assert!(v.to_string().contains("own-your-health/icanotes-cli"));
     // With nothing configured, info says so and names the setup doc.
     assert!(v["setup"]["doc"]
         .as_str()

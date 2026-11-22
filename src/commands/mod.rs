@@ -29,13 +29,13 @@ use crate::login::Window;
 use crate::ratelimit::RateLimiter;
 
 pub const BIN: &str = "icanotes";
-pub const REPO: &str = "piekstra/icanotes-cli";
+pub const REPO: &str = "own-your-health/icanotes-cli";
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// What a patient and their practice do before icanotes can read anything:
 /// named by `info`, `auth status` and every missing-key error.
 pub const SETUP_DOC: &str =
-    "https://github.com/piekstra/icanotes-cli/blob/main/docs/registration.md";
+    "https://github.com/own-your-health/icanotes-cli/blob/main/docs/registration.md";
 
 /// `info`'s `setup`: the doc, and how many keys each profile records. It
 /// reads the config file alone, never the vault or the Keychain, so `info`
