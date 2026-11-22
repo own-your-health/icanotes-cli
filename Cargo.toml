@@ -1,12 +1,12 @@
 [package]
 name = "icanotes-cli"
 description = "Pull your own records from a practice on ICANotes (patientonlineportal.com) through ICANotes' patient API key. Unofficial; not affiliated with or endorsed by ICANotes."
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 # pk-cli-auth's refresh lock (File::lock) needs 1.89.
 rust-version = "1.89"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/piekstra/icanotes-cli"
+repository = "https://github.com/own-your-health/icanotes-cli"
 authors = ["piekstra"]
 keywords = ["fhir", "c-cda", "icanotes", "health-records"]
 categories = ["command-line-utilities"]
@@ -31,8 +31,8 @@ pk-cli-selfupdate = { git = "https://github.com/piekstra/cli-common", tag = "v0.
 pk-cli-documents = { git = "https://github.com/piekstra/cli-common", tag = "v0.33.2" }
 # The portal sign-in window, in the profile's own Chrome profile.
 pk-cli-browser = { git = "https://github.com/piekstra/cli-common", tag = "v0.33.2" }
-pk-med-records = { git = "https://github.com/piekstra/medical-common", tag = "v0.6.2" }
-pk-med-fhir = { git = "https://github.com/piekstra/medical-common", tag = "v0.6.2" }
+pk-med-records = { git = "https://github.com/own-your-health/medical-common", tag = "v0.6.2" }
+pk-med-fhir = { git = "https://github.com/own-your-health/medical-common", tag = "v0.6.2" }
 clap = { version = "4", features = ["derive", "env"] }
 clap_complete = "4"
 serde = { version = "1", features = ["derive"] }
@@ -52,7 +52,7 @@ flate2 = "1"
 quick-xml = "0.42"
 
 [dev-dependencies]
-pk-med-records = { git = "https://github.com/piekstra/medical-common", tag = "v0.6.2", features = ["test-util"] }
+pk-med-records = { git = "https://github.com/own-your-health/medical-common", tag = "v0.6.2", features = ["test-util"] }
 assert_cmd = "2"
 predicates = "3"
 tempfile = "3"

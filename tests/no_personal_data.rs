@@ -247,6 +247,7 @@ fn the_scanner_flags_real_shapes_and_passes_dummies() {
         "phone 2015062203",
         "https://documenter.example.com/view/2843466/x",
         "call 772-404-1234 on 2026-11-19",
+        "bad1234567",
     ] {
         assert!(!scan_line(real).is_empty(), "missed: {real}");
     }
@@ -263,6 +264,7 @@ fn the_scanner_flags_real_shapes_and_passes_dummies() {
         "<birthTime value=\"19000101\"/>",
         "  https://documenter.getpostman.com/view/2843466/RW1bozWC (published",
         "## v0.1.0 (2026-11-19)",
+        "GITLEAKS_SHA256: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     ] {
         assert!(
             scan_line(dummy).is_empty(),

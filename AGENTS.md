@@ -6,7 +6,7 @@ behavioral-health EHR, through the patient API key the practice's portal
 medical-common's `health-records/v1` and `documents/v1` profiles, on the
 `pk-cli-*` crates from [cli-common](https://github.com/piekstra/cli-common)
 and the `pk-med-*` crates from
-[medical-common](https://github.com/piekstra/medical-common).
+[medical-common](https://github.com/own-your-health/medical-common).
 
 ## Layout
 

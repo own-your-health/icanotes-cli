@@ -1077,7 +1077,7 @@ dependencies = [
 
 [[package]]
 name = "icanotes-cli"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "assert_cmd",
  "base64 0.22.1",
@@ -1628,7 +1628,7 @@ dependencies = [
 [[package]]
 name = "pk-med-fhir"
 version = "0.6.2"
-source = "git+https://github.com/piekstra/medical-common?tag=v0.6.2#99332503d2dce9f021141bfc86561124a6a5620e"
+source = "git+https://github.com/own-your-health/medical-common?tag=v0.6.2#99332503d2dce9f021141bfc86561124a6a5620e"
 dependencies = [
  "base64 0.22.1",
  "pk-cli-core",
@@ -1641,7 +1641,7 @@ dependencies = [
 [[package]]
 name = "pk-med-records"
 version = "0.6.2"
-source = "git+https://github.com/piekstra/medical-common?tag=v0.6.2#99332503d2dce9f021141bfc86561124a6a5620e"
+source = "git+https://github.com/own-your-health/medical-common?tag=v0.6.2#99332503d2dce9f021141bfc86561124a6a5620e"
 dependencies = [
  "pk-cli-core",
  "pk-med-fhir",
